@@ -1,0 +1,6 @@
+{
+  "name": "SVNHS SHS Dept - File & Asset Repository Platform",
+  "description": "High-performance repository platform for SVNHS SHS Dept with personalized faculty workspaces, surname-organized admin directories, versioning, folder hierarchies, storage telemetry, and announcements.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

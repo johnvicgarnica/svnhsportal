@@ -1,0 +1,222 @@
+{
+  "entities": {
+    "faculty": {
+      "title": "Faculty Directory",
+      "description": "Registered faculty accounts and details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "department": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "admins": {
+      "title": "Admin Directory",
+      "description": "Registered administrator accounts and details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "designation": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "facultyRequests": {
+      "title": "Faculty Registration Requests",
+      "description": "Pending requests for faculty account creation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "department": { "type": "string" },
+        "requestedAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "adminRequests": {
+      "title": "Admin Registration Requests",
+      "description": "Pending requests for admin account creation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "designation": { "type": "string" },
+        "requestedAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "userPasswords": {
+      "title": "User Passwords",
+      "description": "Encrypted or stored credentials for registered users",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "password"]
+    },
+    "settings": {
+      "title": "System Settings",
+      "description": "Master passwords and global configurations",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "value": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["key", "value"]
+    },
+    "announcements": {
+      "title": "Announcements",
+      "description": "School and department notices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "priority": { "type": "string" },
+        "targetAudience": { "type": "string" },
+        "status": { "type": "string" },
+        "isPinned": { "type": "boolean" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title"]
+    },
+    "driveFolders": {
+      "title": "Google Drive Folders",
+      "description": "Configured repository folders with embedded Google Drive links",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "driveUrl": { "type": "string" },
+        "driveId": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "isDefault": { "type": "boolean" }
+      },
+      "required": ["id", "name", "path", "driveUrl"]
+    },
+    "facultyFolders": {
+      "title": "Faculty Personal Folders",
+      "description": "Folders created by individual registered faculty members",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "facultyEmail": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "facultySurname": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "color": { "type": "string" },
+        "driveUrl": { "type": "string" },
+        "driveId": { "type": "string" },
+        "itemCount": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "facultyEmail", "facultyName", "name"]
+    },
+    "facultyFiles": {
+      "title": "Faculty Personal Files",
+      "description": "Files and links uploaded inside faculty personal folders",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "folderId": { "type": "string" },
+        "facultyEmail": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "title": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSizeBytes": { "type": "number" },
+        "fileSizeFormatted": { "type": "string" },
+        "format": { "type": "string" },
+        "category": { "type": "string" },
+        "driveUrl": { "type": "string" },
+        "isGoogleDriveLink": { "type": "boolean" },
+        "uploadedAt": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "folderId", "facultyEmail", "title", "fileName"]
+    },
+    "facultySubmissions_dll": {
+      "title": "Faculty DLL Submissions",
+      "description": "Weekly Daily Lesson Log submission checklist records per term",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "termId": { "type": "string" },
+        "category": { "type": "string" },
+        "facultyEmail": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "department": { "type": "string" },
+        "weeks": {
+          "type": "array",
+          "items": { "type": "boolean" }
+        },
+        "lastSavedWeek": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "termId", "facultyEmail", "weeks"]
+    },
+    "facultySubmissions_tos": {
+      "title": "Faculty TOS Submissions",
+      "description": "Table of Specifications submission checklist records per term",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "termId": { "type": "string" },
+        "category": { "type": "string" },
+        "facultyEmail": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "department": { "type": "string" },
+        "weeks": {
+          "type": "array",
+          "items": { "type": "boolean" }
+        },
+        "lastSavedWeek": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "termId", "facultyEmail", "weeks"]
+    },
+    "facultySubmissions_tq": {
+      "title": "Faculty TQ Submissions",
+      "description": "Test Questions submission checklist records per term",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "termId": { "type": "string" },
+        "category": { "type": "string" },
+        "facultyEmail": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "department": { "type": "string" },
+        "weeks": {
+          "type": "array",
+          "items": { "type": "boolean" }
+        },
+        "lastSavedWeek": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "termId", "facultyEmail", "weeks"]
+    }
+  }
+}
