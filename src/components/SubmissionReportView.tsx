@@ -1777,7 +1777,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <div className="flex items-center space-x-2">
                 <FileCheck2 className="w-4 h-4 text-emerald-400" />
                 <span>
-                  Official SVNHS SHS {currentCategory.fullName} ({currentCategory.name}) Compliance Report
+                  Official SVNHS {currentCategory.fullName} ({currentCategory.name}) Compliance Report
                 </span>
               </div>
               <div className="text-slate-400">
