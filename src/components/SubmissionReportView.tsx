@@ -443,6 +443,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   };
 
   // Handle single checkbox toggle (Optimistic + Firebase Firestore sync)
+  const [autoSavingItemKey, setAutoSavingItemKey] = useState<string | null>(null);
+
   const handleToggleItem = async (facultyEmail: string, itemIndex: number) => {
     if (!isAdmin) return;
 
@@ -453,7 +455,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       currentItems.push(false);
     }
 
-    currentItems[itemIndex] = !currentItems[itemIndex];
+    const nextValue = !currentItems[itemIndex];
+    currentItems[itemIndex] = nextValue;
 
     const updated = {
       ...submissions,
@@ -462,15 +465,31 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setSubmissions(updated);
 
     const facultyObj = allFaculty.find((f) => f.email === cleanEmail);
-    await saveFacultySubmissionToFirestore(
-      effectiveTermId,
-      activeCategory,
-      cleanEmail,
-      currentItems,
-      facultyObj?.name,
-      facultyObj?.department
-    );
-    setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    const colName = columnItems[itemIndex]?.fullLabel || `Item ${itemIndex + 1}`;
+    const statusLabel = nextValue ? 'Checked (Submitted)' : 'Unchecked (Pending)';
+    const itemKey = `${cleanEmail}_${itemIndex}`;
+
+    setAutoSavingItemKey(itemKey);
+    try {
+      await saveFacultySubmissionToFirestore(
+        effectiveTermId,
+        activeCategory,
+        cleanEmail,
+        currentItems,
+        facultyObj?.name,
+        facultyObj?.department
+      );
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastSavedTimestamp(timeStr);
+      showToast(`☁️ Auto-saved: ${facultyObj?.surname || cleanEmail} • ${colName} (${statusLabel})`);
+    } catch (err) {
+      console.error('Error auto-saving checkbox to Firebase Firestore:', err);
+      showToast(`⚠️ Failed to auto-save ${colName} to Firebase`);
+    } finally {
+      setTimeout(() => {
+        setAutoSavingItemKey((prev) => (prev === itemKey ? null : prev));
+      }, 500);
+    }
   };
 
   // Check all items for a single faculty member
@@ -487,15 +506,24 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setSubmissions(updated);
 
     const facultyObj = allFaculty.find((f) => f.email === cleanEmail);
-    await saveFacultySubmissionToFirestore(
-      effectiveTermId,
-      activeCategory,
-      cleanEmail,
-      currentItems,
-      facultyObj?.name,
-      facultyObj?.department
-    );
-    setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    const actionLabel = checkValue ? 'All items checked' : 'All items cleared';
+
+    try {
+      await saveFacultySubmissionToFirestore(
+        effectiveTermId,
+        activeCategory,
+        cleanEmail,
+        currentItems,
+        facultyObj?.name,
+        facultyObj?.department
+      );
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastSavedTimestamp(timeStr);
+      showToast(`☁️ Auto-saved: ${facultyObj?.surname || cleanEmail} • ${actionLabel}`);
+    } catch (err) {
+      console.error('Error auto-saving bulk items to Firebase:', err);
+      showToast(`⚠️ Failed to auto-save changes to Firebase`);
+    }
   };
 
   // Save data for a specific column/term/week to Firebase Firestore
@@ -1382,6 +1410,15 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
               {/* Administrator Per-Item Retention & Save Controls */}
               <div className="flex flex-wrap items-center gap-2">
+                {/* Auto-Save Live Badge */}
+                <div
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-2xl text-xs font-mono font-bold select-none shadow-2xs"
+                  title="Checkbox changes are automatically and immediately synced to Firebase Firestore in real-time"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Auto-Save Active</span>
+                </div>
+
                 {/* Specific Column Save Dropdown */}
                 <div className="flex items-center space-x-1 bg-white border border-slate-200 p-1 rounded-2xl shadow-2xs">
                   <span className="text-[11px] font-mono font-bold text-slate-500 pl-2">Save:</span>
@@ -1611,6 +1648,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         {/* Checkboxes (Weeks or Term 1, Term 2, Term 3) */}
                         {columnItems.map((col) => {
                           const isChecked = Boolean(items[col.index]);
+                          const isCurrentlySaving = autoSavingItemKey === `${faculty.email.toLowerCase().trim()}_${col.index}`;
                           return (
                             <td
                               key={col.key}
@@ -1626,8 +1664,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                   isChecked
                                     ? 'bg-emerald-500 border-emerald-600 text-white shadow-2xs'
                                     : 'bg-white border-slate-300 text-transparent hover:border-slate-400 hover:bg-slate-50'
-                                }`}
-                                title={`${faculty.name} - ${col.fullLabel}: ${isChecked ? 'Submitted' : 'Pending'}`}
+                                } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
+                                title={`${faculty.name} - ${col.fullLabel}: ${isChecked ? 'Submitted' : 'Pending'} • Auto-saves to Firebase`}
                               >
                                 {isChecked && <Check className="w-4 h-4 stroke-[3]" />}
                               </button>

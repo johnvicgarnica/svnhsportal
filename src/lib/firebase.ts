@@ -921,7 +921,7 @@ export const saveFacultySubmissionToFirestore = async (
       facultyEmail: cleanEmail,
       facultyName: facultyName || '',
       department: department || '',
-      weeks: weeks.slice(0, 11),
+      weeks: Array.isArray(weeks) ? [...weeks] : [],
       updatedAt: new Date().toISOString(),
     };
 
@@ -934,6 +934,7 @@ export const saveFacultySubmissionToFirestore = async (
     }
   } catch (err) {
     console.error(`Error saving faculty ${category} submission to Firestore:`, err);
+    throw err;
   }
 };
 
@@ -954,7 +955,7 @@ export const batchSaveFacultySubmissionsToFirestore = async (
         termId,
         category,
         facultyEmail: cleanEmail,
-        weeks: weeks.slice(0, 11),
+        weeks: Array.isArray(weeks) ? [...weeks] : [],
         updatedAt: new Date().toISOString(),
       };
       return setDoc(doc(db, colName, docId), docPayload, { merge: true });
@@ -963,6 +964,7 @@ export const batchSaveFacultySubmissionsToFirestore = async (
     await Promise.all(promises);
   } catch (err) {
     console.error(`Error batch saving faculty ${category} submissions to Firestore:`, err);
+    throw err;
   }
 };
 
@@ -980,7 +982,7 @@ export const saveWeekDataToFirestore = async (
     const promises = facultyList.map((f) => {
       const cleanEmail = f.email.toLowerCase().trim();
       const docId = `${termId}_${emailToDocId(cleanEmail)}`;
-      const weeks = submissions[cleanEmail] || Array(11).fill(false);
+      const weeks = submissions[cleanEmail] || Array(MAX_TERM_WEEKS).fill(false);
 
       const docPayload = {
         id: docId,
@@ -989,7 +991,7 @@ export const saveWeekDataToFirestore = async (
         facultyEmail: cleanEmail,
         facultyName: f.name || '',
         department: f.department || '',
-        weeks: weeks.slice(0, 11),
+        weeks: Array.isArray(weeks) ? [...weeks] : [],
         lastSavedWeek: weekIndex + 1,
         updatedAt: new Date().toISOString(),
       };
