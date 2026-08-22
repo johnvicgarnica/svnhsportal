@@ -695,12 +695,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     </div>
 
                     {/* Footer Info */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-mono text-slate-500">
-                      <div className="flex items-center space-x-1.5">
-                        <FileText className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="font-bold text-slate-700">{filesCount} files</span>
-                      </div>
-
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-end text-xs font-mono text-slate-500">
                       {folder.driveUrl ? (
                         <div className="flex items-center space-x-1.5">
                           <button

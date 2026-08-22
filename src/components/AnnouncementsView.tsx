@@ -1067,29 +1067,10 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                             <td className="p-3 font-bold text-blue-600">{req.email}</td>
 
                             <td className="p-3 font-mono">
-                              <div className="flex items-center space-x-2">
-                                <span className="font-bold text-amber-800">
-                                  {isMasterAdmin ? (
-                                    revealedReqPasswords[req.id] ? req.password : '••••••••'
-                                  ) : (
-                                    '••••••••'
-                                  )}
-                                </span>
-                                {isMasterAdmin ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleRevealReqPassword(req.id)}
-                                    className="text-slate-500 hover:text-slate-900 cursor-pointer"
-                                    title="Toggle View Password"
-                                  >
-                                    {revealedReqPasswords[req.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400 italic" title="Master Admin Only">
-                                    (Protected)
-                                  </span>
-                                )}
-                              </div>
+                              <span className="text-slate-600 font-medium text-[11px] flex items-center space-x-1.5" title="Encrypted and hidden for user privacy">
+                                <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>•••••••• (Protected)</span>
+                              </span>
                             </td>
 
                             <td className="p-3 text-slate-500 text-[11px]">{req.requestedAt}</td>
@@ -1180,29 +1161,10 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                             <td className="p-3 font-bold text-blue-600">{req.email}</td>
 
                             <td className="p-3 font-mono">
-                              <div className="flex items-center space-x-2">
-                                <span className="font-bold text-amber-800">
-                                  {isMasterAdmin ? (
-                                    revealedAdminReqPasswords[req.id] ? req.password : '••••••••'
-                                  ) : (
-                                    '••••••••'
-                                  )}
-                                </span>
-                                {isMasterAdmin ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleRevealAdminReqPassword(req.id)}
-                                    className="text-slate-500 hover:text-slate-900 cursor-pointer"
-                                    title="Toggle View Password"
-                                  >
-                                    {revealedAdminReqPasswords[req.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400 italic" title="Master Admin Only">
-                                    (Protected)
-                                  </span>
-                                )}
-                              </div>
+                              <span className="text-slate-600 font-medium text-[11px] flex items-center space-x-1.5" title="Encrypted and hidden for user privacy">
+                                <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>•••••••• (Protected)</span>
+                              </span>
                             </td>
 
                             <td className="p-3 text-slate-500 text-[11px]">{req.requestedAt}</td>
@@ -1326,34 +1288,20 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                     <div className="flex items-center justify-between border-t md:border-t-0 md:border-l border-slate-200 pt-2 md:pt-0 md:pl-4">
                       <div>
                         <span className="text-[10px] font-mono text-slate-500 block uppercase font-bold">
-                          Master Admin Password:
+                          Master Admin Password Status:
                         </span>
                         <div className="flex items-center space-x-2 mt-1">
-                          <span className="font-mono text-xs font-bold text-slate-900 tracking-wider">
-                            {isMasterAdmin ? (
-                              showMasterAdminPassword ? (masterAdminPassword || '••••••••••••') : '••••••••••••'
-                            ) : (
-                              '•••••••••••• (Master Admin Only)'
-                            )}
+                          <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                          <span className="font-mono text-xs font-bold text-slate-800 tracking-widest">
+                            ••••••••••••••••
                           </span>
                         </div>
                       </div>
 
-                      {isMasterAdmin ? (
-                        <button
-                          type="button"
-                          onClick={() => setShowMasterAdminPassword(!showMasterAdminPassword)}
-                          className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-mono font-bold rounded-lg border border-slate-200 flex items-center space-x-1 cursor-pointer shrink-0"
-                        >
-                          {showMasterAdminPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                          <span>{showMasterAdminPassword ? 'Hide' : 'Show'}</span>
-                        </button>
-                      ) : (
-                        <span className="px-2.5 py-1 bg-slate-100 text-slate-400 text-[10px] font-mono font-bold rounded-lg border border-slate-200 flex items-center space-x-1 shrink-0">
-                          <Lock className="w-3 h-3 text-slate-400" />
-                          <span>Protected</span>
-                        </span>
-                      )}
+                      <span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-mono font-bold rounded-lg border border-slate-200 flex items-center space-x-1 shrink-0">
+                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                        <span>Protected for Privacy</span>
+                      </span>
                     </div>
                   </div>
 
@@ -1471,34 +1419,20 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between">
                     <div>
                       <span className="text-[10px] font-mono text-slate-500 block uppercase font-bold">
-                        Current Master Faculty Password:
+                        Active Master Faculty Password Status:
                       </span>
                       <div className="flex items-center space-x-2 mt-1">
-                        <span className="font-mono text-sm font-bold text-amber-800 tracking-wider">
-                          {isMasterAdmin ? (
-                            showMasterPassword ? masterPassword : '••••••••••••'
-                          ) : (
-                            '•••••••••••• (Master Admin Only)'
-                          )}
+                        <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span className="font-mono text-sm font-bold text-slate-800 tracking-widest">
+                          ••••••••••••••••
                         </span>
                       </div>
                     </div>
 
-                    {isMasterAdmin ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowMasterPassword(!showMasterPassword)}
-                        className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-mono font-bold rounded-lg border border-slate-200 flex items-center space-x-1.5 cursor-pointer"
-                      >
-                        {showMasterPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        <span>{showMasterPassword ? 'Hide' : 'Show Password'}</span>
-                      </button>
-                    ) : (
-                      <span className="px-3 py-1.5 bg-slate-100 text-slate-400 text-xs font-mono font-bold rounded-lg border border-slate-200 flex items-center space-x-1.5">
-                        <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Protected</span>
-                      </span>
-                    )}
+                    <span className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-mono font-bold rounded-lg border border-slate-200 flex items-center space-x-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Protected for Privacy</span>
+                    </span>
                   </div>
 
                   {/* Form to Update Master Password */}
@@ -1742,16 +1676,10 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                               </td>
 
                               <td className="p-3 font-mono font-bold">
-                                {isMasterAdmin ? (
-                                  <span className="text-amber-800">
-                                    {isCustom ? customPass : `${masterPassword} (Master)`}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400 font-medium text-[11px] flex items-center space-x-1" title="Only Master Admin can view active faculty passwords">
-                                    <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                                    <span>•••••••• (Master Admin Only)</span>
-                                  </span>
-                                )}
+                                <span className="text-slate-600 font-medium text-[11px] flex items-center space-x-1.5" title="All faculty passwords are encrypted and hidden for privacy">
+                                  <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                                  <span>•••••••• (Protected)</span>
+                                </span>
                               </td>
 
                               <td className="p-3 text-right">
@@ -1760,7 +1688,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                                     <button
                                       onClick={() => {
                                         setEditingFaculty({ name: f.name, email: f.email });
-                                        setIndividualPasswordInput(customPass || masterPassword);
+                                        setIndividualPasswordInput('');
                                       }}
                                       className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg border border-slate-200 font-bold text-[11px] transition-all cursor-pointer flex items-center space-x-1"
                                       title="Change Password for this specific faculty member"
@@ -1873,16 +1801,10 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                             </td>
 
                             <td className="p-3 font-mono font-bold">
-                              {isMasterAdmin ? (
-                                <span className="text-amber-800">
-                                  {customPass || 'DepEd Admin Password'}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 font-medium text-[11px] flex items-center space-x-1" title="Only Master Admin can view admin passwords">
-                                  <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                                  <span>•••••••• (Master Admin Only)</span>
-                                </span>
-                              )}
+                              <span className="text-slate-600 font-medium text-[11px] flex items-center space-x-1.5" title="All admin passwords are encrypted and hidden for privacy">
+                                <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>•••••••• (Protected)</span>
+                              </span>
                             </td>
 
                             <td className="p-3 text-right">
@@ -2484,14 +2406,14 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700">Initial Password (Optional)</label>
                 <input
-                  type="text"
+                  type="password"
                   value={newFacultyPass}
                   onChange={(e) => setNewFacultyPass(e.target.value)}
                   placeholder="Leave empty to use Master Password"
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-mono"
                 />
                 <span className="text-[10px] text-slate-500 block">
-                  * If left blank, defaults to current Master Faculty Password ({masterPassword}).
+                  * If left blank, defaults to the secure Master Faculty Password.
                 </span>
               </div>
 

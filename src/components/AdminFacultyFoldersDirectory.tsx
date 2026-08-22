@@ -447,7 +447,6 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
 
                         <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs font-mono text-slate-500">
                           <div className="flex items-center space-x-2">
-                            <span className="font-bold text-slate-700">{count} files</span>
                             {folder.driveUrl && (
                               <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
                                 <HardDrive className="w-3 h-3 text-emerald-600" />
@@ -631,10 +630,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                     </div>
 
                     {/* Bottom Action */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-500 font-bold">
-                        {files.length} total files
-                      </span>
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-end text-xs font-mono">
                       <span className="text-blue-600 font-bold flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
                         <span>Open Folder</span>
                         <ChevronRight className="w-3.5 h-3.5" />
