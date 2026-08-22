@@ -942,7 +942,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             <span className="text-xs text-slate-500 font-mono">teachers</span>
           </div>
           <p className="text-[11px] text-slate-500 truncate">
-            Senior High School Department
+            JHS & SHS Teachers
           </p>
         </div>
 

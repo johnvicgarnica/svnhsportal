@@ -739,10 +739,10 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
             </div>
             <div>
               <h1 className="text-xl font-bold font-mono text-slate-900 tracking-tight">
-                Important Department Announcements
+                Important Announcements
               </h1>
               <p className="text-xs text-slate-500 font-medium">
-                San Vicente National High School • Senior High School Department Directives & Bulletins
+                San Vicente National High School • Directives & Bulletins
               </p>
             </div>
           </div>
@@ -804,7 +804,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                 }`}
               >
                 <Megaphone className="w-3.5 h-3.5" />
-                <span>Department Bulletins ({announcements.length})</span>
+                <span>School Bulletins ({announcements.length})</span>
               </button>
 
               <button
@@ -832,7 +832,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
 
             <div className="text-[11px] font-mono text-slate-500 flex items-center space-x-1.5 px-2">
               <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
-              <span>DepEd SHS Admin Security Panel</span>
+              <span>Admin Security Panel</span>
             </div>
           </div>
 
