@@ -10,6 +10,16 @@ import {
   extractFacultySurname,
   FacultyDoc,
   SubmissionCategory,
+  TermWeeksConfig,
+  DEFAULT_TERM_WEEKS_CONFIG,
+  MAX_TERM_WEEKS,
+  MIN_TERM_WEEKS,
+  getStoredTermWeeksConfig,
+  saveTermWeeksConfigToFirestore,
+  subscribeTermWeeksConfig,
+  getStoredActiveTermId,
+  saveActiveTermIdToFirestore,
+  subscribeActiveTermId,
 } from '../lib/firebase';
 import {
   BarChart,
@@ -52,6 +62,16 @@ import {
   HelpCircle,
   TrendingUp,
   PieChart as PieChartIcon,
+  SlidersHorizontal,
+  Plus,
+  Minus,
+  X,
+  CalendarDays,
+  Settings,
+  Star,
+  BookmarkCheck,
+  LogOut,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface SubmissionReportViewProps {
@@ -63,9 +83,10 @@ export interface TermDefinition {
   id: string;
   name: string;
   description: string;
+  weeks?: number;
 }
 
-export const TERMS: TermDefinition[] = [
+export const BASE_TERMS: TermDefinition[] = [
   { id: 'term-1', name: '1st Term', description: 'Weeks 1 to 11' },
   { id: 'term-2', name: '2nd Term', description: 'Weeks 1 to 11' },
   { id: 'term-3', name: '3rd Term', description: 'Weeks 1 to 11' },
@@ -88,7 +109,7 @@ export const CATEGORIES: CategoryDefinition[] = [
     id: 'dll',
     name: 'DLL',
     fullName: 'Daily Lesson Log',
-    shortDescription: 'Weekly instructional lesson logs and teaching deliverables across Weeks 1 to 11',
+    shortDescription: 'Weekly instructional lesson logs and teaching deliverables per term',
     icon: '📝',
     badgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
     activeBg: 'bg-blue-600 text-white',
@@ -131,14 +152,24 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Navigation & Category States
   const [activeCategory, setActiveCategory] = useState<SubmissionCategory>('dll');
-  const [selectedTermId, setSelectedTermId] = useState<string>('term-1');
-  const [visibleWeeksCount, setVisibleWeeksCount] = useState<number>(11);
+  const [activeDefaultTermId, setActiveDefaultTermId] = useState<string>(() => getStoredActiveTermId());
+  const [selectedTermId, setSelectedTermId] = useState<string>(() => getStoredActiveTermId());
+  const [isSettingActiveTerm, setIsSettingActiveTerm] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'in-progress' | 'none'>('all');
   const [viewMode, setViewMode] = useState<'faculty-chart' | 'weekly-chart' | 'pie-chart'>('faculty-chart');
   const [facultyPieTab, setFacultyPieTab] = useState<'both' | 'compliance' | 'volume' | 'periods'>('both');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
+
+  // Term Weeks Configuration (Max 12 weeks per term)
+  const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
+  const [isSettingWeeksModalOpen, setIsSettingWeeksModalOpen] = useState<boolean>(false);
+  const [tempWeeksConfig, setTempWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
+  const [isSavingWeeksConfig, setIsSavingWeeksConfig] = useState<boolean>(false);
+  const [isSavingSingleTerm, setIsSavingSingleTerm] = useState<string | null>(null);
+  const [savedTermSuccess, setSavedTermSuccess] = useState<Record<string, boolean>>({});
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
 
   // Persistence / Saving States
   const [isSavingIndex, setIsSavingIndex] = useState<number | null>(null);
@@ -150,14 +181,46 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [registeredFaculty, setRegisteredFaculty] = useState<FacultyDoc[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Subscribe to real-time term weeks configuration from Firebase
+  useEffect(() => {
+    const unsub = subscribeTermWeeksConfig((config) => {
+      setTermWeeksConfig(config);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to real-time active default academic term from Firebase
+  useEffect(() => {
+    const unsub = subscribeActiveTermId((termId) => {
+      setActiveDefaultTermId(termId);
+    });
+    return () => unsub();
+  }, []);
+
   // Compute active term storage ID
   // DLL is per academic term (term-1, term-2, term-3)
   // TOS and TQ are tracked across the 3 terms (Term 1, Term 2, Term 3) in a unified annual document
   const effectiveTermId = activeCategory === 'dll' ? selectedTermId : 'annual';
 
+  // Current active term's configured week count (1 to 12)
+  const currentTermWeeks = useMemo(() => {
+    if (activeCategory !== 'dll') return 3;
+    const count = termWeeksConfig[selectedTermId as keyof TermWeeksConfig];
+    return typeof count === 'number' && count >= MIN_TERM_WEEKS && count <= MAX_TERM_WEEKS ? count : 11;
+  }, [activeCategory, selectedTermId, termWeeksConfig]);
+
+  // Dynamic list of academic terms with accurate configured weeks
+  const termsList: TermDefinition[] = useMemo(() => {
+    return [
+      { id: 'term-1', name: '1st Term', description: `Weeks 1 to ${termWeeksConfig['term-1'] || 11}`, weeks: termWeeksConfig['term-1'] || 11 },
+      { id: 'term-2', name: '2nd Term', description: `Weeks 1 to ${termWeeksConfig['term-2'] || 11}`, weeks: termWeeksConfig['term-2'] || 11 },
+      { id: 'term-3', name: '3rd Term', description: `Weeks 1 to ${termWeeksConfig['term-3'] || 11}`, weeks: termWeeksConfig['term-3'] || 11 },
+    ];
+  }, [termWeeksConfig]);
+
   // Submissions map: key is facultyEmail, value is boolean array
   const [submissions, setSubmissions] = useState<Record<string, boolean[]>>(() => {
-    return getStoredFacultySubmissions('term-1', 'dll');
+    return getStoredFacultySubmissions(getStoredActiveTermId(), 'dll');
   });
 
   // Subscribe to faculty list
@@ -248,10 +311,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const currentCategory = CATEGORIES.find((c) => c.id === activeCategory) || CATEGORIES[0];
   const isWeeklyCategory = currentCategory.itemType === 'weekly';
 
-  // Dynamic Column Definitions based on category
+  // Dynamic Column Definitions based on category and configured term weeks (1 to 12 max)
   const columnItems = useMemo(() => {
     if (activeCategory === 'dll') {
-      return Array.from({ length: visibleWeeksCount }, (_, i) => ({
+      return Array.from({ length: currentTermWeeks }, (_, i) => ({
         index: i,
         key: `w-${i + 1}`,
         headerLabel: `W${i + 1}`,
@@ -272,7 +335,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         { index: 2, key: 'tq-t3', headerLabel: 'Term 3 TQ', fullLabel: 'Term 3 TQ', shortLabel: 'T3 TQ', description: 'Term 3 Test Questions' },
       ];
     }
-  }, [activeCategory, visibleWeeksCount]);
+  }, [activeCategory, currentTermWeeks]);
 
   const totalItemCount = columnItems.length;
 
@@ -280,6 +343,103 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const showToast = (msg: string) => {
     setCopiedToast(msg);
     setTimeout(() => setCopiedToast(null), 3000);
+  };
+
+  // Handle setting official active academic term (Default across all users and page refreshes)
+  const handleSetCurrentActiveTerm = async (termIdToSet: string) => {
+    if (!isAdmin) return;
+    setIsSettingActiveTerm(true);
+    try {
+      await saveActiveTermIdToFirestore(termIdToSet);
+      setActiveDefaultTermId(termIdToSet);
+      setSelectedTermId(termIdToSet);
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      const termObj = termsList.find((t) => t.id === termIdToSet);
+      const termName = termObj?.name || (termIdToSet === 'term-1' ? '1st Term' : termIdToSet === 'term-2' ? '2nd Term' : '3rd Term');
+      showToast(`⭐ ${termName} is now saved in Firebase as the default Current Term on page refresh!`);
+    } catch (err) {
+      console.error('Error saving current active term:', err);
+      showToast('⚠️ Failed to save current term to Firebase');
+    } finally {
+      setIsSettingActiveTerm(false);
+    }
+  };
+
+  // Handle saving configured weeks for a specific single term immediately to Firebase
+  const handleSaveSingleTermWeeks = async (termId: 'term-1' | 'term-2' | 'term-3', customWeeks?: number) => {
+    if (!isAdmin) return;
+    setIsSavingSingleTerm(termId);
+    try {
+      const targetWeeks = customWeeks !== undefined ? customWeeks : (tempWeeksConfig[termId] || 11);
+      const sanitizedWeeks = Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(targetWeeks) || 11));
+      const updated: TermWeeksConfig = {
+        'term-1': termId === 'term-1' ? sanitizedWeeks : (tempWeeksConfig['term-1'] || termWeeksConfig['term-1'] || 11),
+        'term-2': termId === 'term-2' ? sanitizedWeeks : (tempWeeksConfig['term-2'] || termWeeksConfig['term-2'] || 11),
+        'term-3': termId === 'term-3' ? sanitizedWeeks : (tempWeeksConfig['term-3'] || termWeeksConfig['term-3'] || 11),
+      };
+      setTempWeeksConfig(updated);
+      setTermWeeksConfig(updated);
+      await saveTermWeeksConfigToFirestore(updated);
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      
+      setSavedTermSuccess((prev) => ({ ...prev, [termId]: true }));
+      setTimeout(() => {
+        setSavedTermSuccess((prev) => ({ ...prev, [termId]: false }));
+      }, 3000);
+
+      const termName = termId === 'term-1' ? '1st Term' : termId === 'term-2' ? '2nd Term' : '3rd Term';
+      showToast(`💾 Saved ${termName} to Firebase: ${sanitizedWeeks} Weeks (W1–W${sanitizedWeeks})`);
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Failed to save term weeks configuration to Firebase');
+    } finally {
+      setIsSavingSingleTerm(null);
+    }
+  };
+
+  // Quick adjustment with optional auto-save to Firebase
+  const handleQuickChangeTermWeeks = async (termId: 'term-1' | 'term-2' | 'term-3', newWeeks: number) => {
+    if (!isAdmin) return;
+    const sanitizedWeeks = Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(newWeeks) || 11));
+    const updated: TermWeeksConfig = {
+      ...tempWeeksConfig,
+      [termId]: sanitizedWeeks,
+    };
+    setTempWeeksConfig(updated);
+
+    if (autoSaveEnabled) {
+      setTermWeeksConfig(updated);
+      await saveTermWeeksConfigToFirestore(updated);
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setSavedTermSuccess((prev) => ({ ...prev, [termId]: true }));
+      setTimeout(() => {
+        setSavedTermSuccess((prev) => ({ ...prev, [termId]: false }));
+      }, 2500);
+    }
+  };
+
+  // Handle saving configured weeks per term (All terms at once)
+  const handleSaveWeeksConfiguration = async () => {
+    if (!isAdmin) return;
+    setIsSavingWeeksConfig(true);
+    try {
+      const sanitized: TermWeeksConfig = {
+        'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(tempWeeksConfig['term-1']) || 11)),
+        'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(tempWeeksConfig['term-2']) || 11)),
+        'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(tempWeeksConfig['term-3']) || 11)),
+      };
+      await saveTermWeeksConfigToFirestore(sanitized);
+      setTermWeeksConfig(sanitized);
+      setTempWeeksConfig(sanitized);
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setIsSettingWeeksModalOpen(false);
+      showToast(`⚙️ Number of weeks saved to Firebase! (Term 1: ${sanitized['term-1']}w, Term 2: ${sanitized['term-2']}w, Term 3: ${sanitized['term-3']}w)`);
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Failed to save term weeks configuration');
+    } finally {
+      setIsSavingWeeksConfig(false);
+    }
   };
 
   // Handle single checkbox toggle (Optimistic + Firebase Firestore sync)
@@ -670,7 +830,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       // In Faculty Mode, copy only aggregate summary without colleague names
       const summaryText =
         `SVNHS SHS DEPARTMENT - ${currentCategory.fullName.toUpperCase()} (${currentCategory.name}) SUBMISSION OVERVIEW\n` +
-        `Period: ${isWeeklyCategory ? TERMS.find((t) => t.id === selectedTermId)?.name + ` (Weeks 1 to ${visibleWeeksCount})` : 'All Terms (Term 1, Term 2, Term 3)'}\n` +
+        `Period: ${isWeeklyCategory ? termsList.find((t) => t.id === selectedTermId)?.name + ` (Weeks 1 to ${currentTermWeeks})` : 'All Terms (Term 1, Term 2, Term 3)'}\n` +
         `Total Faculty Members: ${stats.totalFaculty}\n` +
         `Overall Compliance: ${stats.overallPercentage}%\n` +
         `100% Completed: ${stats.completedFacultyCount} / ${stats.totalFaculty} (${Math.round((stats.completedFacultyCount / (stats.totalFaculty || 1)) * 100)}%)\n` +
@@ -685,7 +845,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
     const summaryText =
       `SVNHS SHS DEPARTMENT - ${currentCategory.fullName.toUpperCase()} (${currentCategory.name}) SUBMISSION REPORT\n` +
-      `Period: ${isWeeklyCategory ? TERMS.find((t) => t.id === selectedTermId)?.name + ` (Weeks 1 to ${visibleWeeksCount})` : 'All Terms (Term 1, Term 2, Term 3)'}\n` +
+      `Period: ${isWeeklyCategory ? termsList.find((t) => t.id === selectedTermId)?.name + ` (Weeks 1 to ${currentTermWeeks})` : 'All Terms (Term 1, Term 2, Term 3)'}\n` +
       `Total Faculty: ${stats.totalFaculty}\n` +
       `Overall Compliance: ${stats.overallPercentage}%\n` +
       `100% Completed: ${stats.completedFacultyCount} / ${stats.totalFaculty}\n\n` +
@@ -713,7 +873,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return '#94A3B8'; // Slate 400
   };
 
-  const currentTerm = TERMS.find((t) => t.id === selectedTermId) || TERMS[0];
+  const currentTerm = termsList.find((t) => t.id === selectedTermId) || termsList[0];
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
@@ -741,7 +901,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
               {isWeeklyCategory ? (
                 <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-mono px-3 py-1 rounded-full font-bold">
-                  {visibleWeeksCount === 11 ? '11-Week Term Tracking' : `Showing Weeks 1 to ${visibleWeeksCount}`}
+                  {currentTerm.name}: Weeks 1 to {currentTermWeeks}
                 </span>
               ) : (
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-mono px-3 py-1 rounded-full font-bold">
@@ -762,48 +922,197 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               )}
             </div>
             <p className="text-xs sm:text-sm text-blue-100/80 max-w-2xl">
-              Track and monitor instructional compliance across <strong className="text-white">Daily Lesson Logs (DLL: Weeks 1–11)</strong>, <strong className="text-white">Table of Specifications (TOS: Term 1, 2, 3)</strong>, and <strong className="text-white">Test Questions (TQ: Term 1, 2, 3)</strong> with persistent Firebase cloud retention.
+              Track and monitor instructional compliance across <strong className="text-white">Daily Lesson Logs (DLL: Configurable up to 12 Weeks)</strong>, <strong className="text-white">Table of Specifications (TOS: Term 1, 2, 3)</strong>, and <strong className="text-white">Test Questions (TQ: Term 1, 2, 3)</strong> with persistent Firebase cloud retention.
             </p>
           </div>
 
           {/* Action Controls & Selectors */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Term Dropdown Selector (Active for DLL) */}
+            {/* Term Dropdown Selector (Active for DLL) with Admin Current Term Setter */}
             {isWeeklyCategory ? (
               <>
-                <div className="relative">
-                  <select
-                    value={selectedTermId}
-                    onChange={(e) => setSelectedTermId(e.target.value)}
-                    aria-label="Select Academic Term"
-                    className="appearance-none bg-white/10 hover:bg-white/15 border border-white/20 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl pl-3.5 pr-9 py-2.5 transition-all cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-blue-400"
-                  >
-                    {TERMS.map((t) => (
-                      <option key={t.id} value={t.id} className="bg-slate-900 text-white font-mono">
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-white/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <div className="flex items-center space-x-1.5">
+                  <div className="relative">
+                    <select
+                      value={selectedTermId}
+                      onChange={(e) => {
+                        setSelectedTermId(e.target.value);
+                      }}
+                      aria-label="Select Academic Term"
+                      className="appearance-none bg-white/10 hover:bg-white/15 border border-white/20 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl pl-3.5 pr-9 py-2.5 transition-all cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                    >
+                      {termsList.map((t) => {
+                        const isDefault = t.id === activeDefaultTermId;
+                        return (
+                          <option key={t.id} value={t.id} className="bg-slate-900 text-white font-mono">
+                            {t.name} {isDefault ? '⭐ [Current Term]' : ''} ({t.description})
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-white/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+
+                  {/* Admin Button: Set as Current Term to persist in Firebase across refreshes */}
+                  {isAdmin ? (
+                    selectedTermId === activeDefaultTermId ? (
+                      <div
+                        className="flex items-center space-x-1.5 px-3 py-2 bg-amber-500/20 text-amber-200 border border-amber-400/40 rounded-2xl text-xs font-mono font-bold shadow-xs select-none"
+                        title="Official Current Academic Term saved in Firebase (automatically loaded on page load & refresh)"
+                      >
+                        <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+                        <span className="hidden sm:inline">Current Term</span>
+                        <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded-full font-mono font-extrabold">Default ✓</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSetCurrentActiveTerm(selectedTermId)}
+                        disabled={isSettingActiveTerm}
+                        className="px-3.5 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 text-xs font-mono font-extrabold rounded-2xl transition-all shadow-md flex items-center space-x-1.5 cursor-pointer active:scale-95 border border-amber-200"
+                        title={`Set ${currentTerm.name} as the official default Current Term in Firebase so it opens on refresh`}
+                      >
+                        {isSettingActiveTerm ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-slate-950" />
+                        ) : (
+                          <Star className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
+                        )}
+                        <span>Set as Current Term</span>
+                      </button>
+                    )
+                  ) : (
+                    selectedTermId === activeDefaultTermId ? (
+                      <div
+                        className="flex items-center space-x-1.5 px-3 py-2 bg-amber-500/20 text-amber-200 border border-amber-400/40 rounded-2xl text-xs font-mono font-bold select-none"
+                        title="Currently viewing the official active academic term"
+                      >
+                        <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+                        <span>Current Term</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTermId(activeDefaultTermId)}
+                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-amber-200 hover:text-white rounded-2xl text-xs font-mono font-bold transition-all cursor-pointer flex items-center space-x-1 border border-white/20"
+                        title="Switch view back to the current active academic term"
+                      >
+                        <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
+                        <span className="hidden sm:inline">Go to Current (T{activeDefaultTermId.replace('term-', '')})</span>
+                      </button>
+                    )
+                  )}
                 </div>
 
-                {/* Weeks Count Selector */}
-                <div className="relative">
-                  <select
-                    value={visibleWeeksCount}
-                    onChange={(e) => setVisibleWeeksCount(Number(e.target.value))}
-                    aria-label="Select Number of Weeks to Show"
-                    className="appearance-none bg-white/10 hover:bg-white/15 border border-white/20 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl pl-3.5 pr-9 py-2.5 transition-all cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-blue-400"
-                    title="Select number of weeks to display on the checkboxes (Weeks 1 to 11)"
-                  >
-                    {Array.from({ length: 11 }, (_, i) => 11 - i).map((num) => (
-                      <option key={num} value={num} className="bg-slate-900 text-white font-mono">
-                        {num === 11 ? 'Show: Weeks 1 to 11 (All)' : `Show: Weeks 1 to ${num}`}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-white/70 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                {/* Inline Week Adjuster & Immediate Save Button (Admin) or Indicator (Faculty) */}
+                {isAdmin ? (
+                  <div className="flex items-center space-x-1.5 bg-white/10 border border-white/20 p-1 rounded-2xl shadow-inner backdrop-blur-xs">
+                    <span className="text-[11px] font-mono font-bold text-blue-200 pl-2 hidden sm:inline">
+                      Weeks:
+                    </span>
+
+                    {/* Stepper */}
+                    <div className="flex items-center space-x-1 bg-slate-900/60 border border-white/10 rounded-xl px-1 py-0.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleQuickChangeTermWeeks(
+                            selectedTermId as any,
+                            Math.max(MIN_TERM_WEEKS, currentTermWeeks - 1)
+                          )
+                        }
+                        disabled={currentTermWeeks <= MIN_TERM_WEEKS}
+                        className="p-1 rounded-lg text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-30 transition-all cursor-pointer"
+                        title="Decrease weeks"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+
+                      <span className="w-7 text-center font-mono font-extrabold text-xs text-white">
+                        {currentTermWeeks}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleQuickChangeTermWeeks(
+                            selectedTermId as any,
+                            Math.min(MAX_TERM_WEEKS, currentTermWeeks + 1)
+                          )
+                        }
+                        disabled={currentTermWeeks >= MAX_TERM_WEEKS}
+                        className="p-1 rounded-lg text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-30 transition-all cursor-pointer"
+                        title="Increase weeks"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Quick Dropdown (1 to 12) */}
+                    <select
+                      value={currentTermWeeks}
+                      onChange={(e) =>
+                        handleQuickChangeTermWeeks(
+                          selectedTermId as any,
+                          Number(e.target.value)
+                        )
+                      }
+                      aria-label="Select weeks"
+                      className="bg-slate-900/60 border border-white/10 text-white text-xs font-mono font-bold rounded-xl px-2 py-1.5 cursor-pointer focus:outline-hidden"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((w) => (
+                        <option key={w} value={w} className="bg-slate-900 text-white">
+                          {w} {w === 1 ? 'Wk' : 'Wks'}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Save Button for active term weeks */}
+                    <button
+                      type="button"
+                      onClick={() => handleSaveSingleTermWeeks(selectedTermId as any, currentTermWeeks)}
+                      disabled={isSavingSingleTerm === selectedTermId}
+                      className={`px-3 py-1.5 text-xs font-mono font-bold rounded-xl transition-all shadow-md flex items-center space-x-1.5 cursor-pointer active:scale-95 border ${
+                        savedTermSuccess[selectedTermId]
+                          ? 'bg-emerald-600 border-emerald-400 text-white'
+                          : 'bg-blue-600 hover:bg-blue-500 border-blue-400/40 text-white'
+                      }`}
+                      title={`Save ${currentTerm.name} (${currentTermWeeks} weeks) directly to Firebase Firestore`}
+                    >
+                      {isSavingSingleTerm === selectedTermId ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : savedTermSuccess[selectedTermId] ? (
+                        <Check className="w-3.5 h-3.5 text-white" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5 text-blue-200" />
+                      )}
+                      <span>
+                        {isSavingSingleTerm === selectedTermId
+                          ? 'Saving...'
+                          : savedTermSuccess[selectedTermId]
+                          ? 'Saved ✓'
+                          : 'Save Weeks'}
+                      </span>
+                    </button>
+
+                    {/* Open Full Configure Modal Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTempWeeksConfig(termWeeksConfig);
+                        setIsSettingWeeksModalOpen(true);
+                      }}
+                      className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer"
+                      title="Open full weeks per term configuration modal"
+                    >
+                      <SlidersHorizontal className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white/10 border border-white/20 px-3.5 py-2.5 rounded-2xl text-xs font-mono text-white flex items-center space-x-2 font-bold">
+                    <Calendar className="w-4 h-4 text-blue-300" />
+                    <span>{currentTerm.name}: Weeks 1 to {currentTermWeeks}</span>
+                  </div>
+                )}
               </>
             ) : (
               <div className="bg-white/10 border border-white/20 px-3.5 py-2.5 rounded-2xl text-xs font-mono text-white flex items-center space-x-1.5 font-bold">
@@ -890,7 +1199,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           <div className="text-slate-500 font-medium">
             {isWeeklyCategory ? (
               <>
-                Active: <span className="font-bold text-blue-600">{currentTerm.name}</span> • <span className="font-bold text-indigo-600">Weeks 1 to {visibleWeeksCount}</span>
+                Active: <span className="font-bold text-blue-600">{currentTerm.name}</span> • <span className="font-bold text-indigo-600">Weeks 1 to {currentTermWeeks}</span>
               </>
             ) : (
               <>
@@ -963,7 +1272,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </span>
           </div>
           <p className="text-[11px] text-emerald-700 font-mono font-medium truncate">
-            {stats.totalFaculty > 0 ? Math.round((stats.completedFacultyCount / stats.totalFaculty) * 100) : 0}% perfect compliance ({isWeeklyCategory ? `Weeks 1–${visibleWeeksCount}` : 'Terms 1, 2 & 3'})
+            {stats.totalFaculty > 0 ? Math.round((stats.completedFacultyCount / stats.totalFaculty) * 100) : 0}% perfect compliance ({isWeeklyCategory ? `Weeks 1–${currentTermWeeks}` : 'Terms 1, 2 & 3'})
           </p>
         </div>
 
@@ -984,7 +1293,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </span>
           </div>
           <p className="text-[11px] text-slate-500 truncate font-mono">
-            {isWeeklyCategory ? `${currentTerm.name} • Weeks 1–${visibleWeeksCount}` : 'All 3 Academic Terms'}
+            {isWeeklyCategory ? `${currentTerm.name} • Weeks 1–${currentTermWeeks}` : 'All 3 Academic Terms'}
           </p>
         </div>
       </div>
@@ -1065,7 +1374,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   </h3>
                   <p className="text-xs text-slate-500 font-mono">
                     {isWeeklyCategory
-                      ? `Check each week (W1 – W${visibleWeeksCount}) to record instructional submissions for all faculty members.`
+                      ? `Check each week (W1 – W${currentTermWeeks}) to record instructional submissions for all faculty members.`
                       : `Check Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} for all faculty members.`}
                   </p>
                 </div>
@@ -1374,16 +1683,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           {/* Directory Footer Info */}
           <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-slate-500 gap-2">
             <div className="flex items-center space-x-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
               <span>Green Check = Submitted {currentCategory.name}</span>
               <span className="text-slate-300">•</span>
-              <span className="w-2 h-2 rounded-full bg-slate-300" />
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" />
               <span>Empty Box = Pending</span>
             </div>
             <div>
               Showing <span className="font-bold text-slate-700">{filteredFaculty.length}</span> faculty members for{' '}
               <span className="font-bold text-blue-700">
-                {currentCategory.name} • {isWeeklyCategory ? `${currentTerm.name} (Weeks 1–${visibleWeeksCount})` : 'Term 1, Term 2 & Term 3'}
+                {currentCategory.name} • {isWeeklyCategory ? `${currentTerm.name} (Weeks 1–${currentTermWeeks})` : 'Term 1, Term 2 & Term 3'}
               </span>
             </div>
           </div>
@@ -1418,7 +1727,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 {!isAdmin
                   ? `Department submission analytics visualizer for ${currentCategory.name}. Displays aggregate progress through pie charts with faculty privacy protection.`
                   : isWeeklyCategory
-                  ? `Analytical charts representing submitted weeks out of ${visibleWeeksCount} for all faculty members.`
+                  ? `Analytical charts representing submitted weeks out of ${currentTermWeeks} for all faculty members.`
                   : `Visualizer showing Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} compliance.`}
               </p>
             </div>
@@ -1447,7 +1756,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                {isWeeklyCategory ? `Weekly Trend (W1–W${visibleWeeksCount})` : `Term Trend`}
+                {isWeeklyCategory ? `Weekly Trend (W1–W${currentTermWeeks})` : `Term Trend`}
               </button>
               <button
                 type="button"
@@ -1712,7 +2021,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                       <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
                       <span>
                         {isWeeklyCategory
-                          ? `Weekly Submission Distribution (${currentTerm.name} • W1 to W${visibleWeeksCount})`
+                          ? `Weekly Submission Distribution (${currentTerm.name} • W1 to W${currentTermWeeks})`
                           : `Term Compliance Distribution (Term 1, Term 2 & Term 3)`}
                       </span>
                     </h4>
@@ -1931,11 +2240,346 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
             <div className="text-center text-xs font-mono text-slate-500 pt-2 border-t border-slate-100">
               Department-wide {currentCategory.fullName} ({currentCategory.name}) compliance breakdown for{' '}
-              {isWeeklyCategory ? `${currentTerm.name} (Weeks 1 to ${visibleWeeksCount})` : 'Term 1, Term 2 and Term 3'}
+              {isWeeklyCategory ? `${currentTerm.name} (Weeks 1 to ${currentTermWeeks})` : 'Term 1, Term 2 and Term 3'}
             </div>
           </div>
         )}
       </div>
+
+      {/* ADMIN: SET NUMBER OF WEEKS PER TERM MODAL (1 to 12 Weeks Max) */}
+      {isSettingWeeksModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-4 sm:p-6 flex items-start justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-blue-500/20 text-blue-300 rounded-2xl border border-blue-400/30">
+                  <CalendarDays className="w-6 h-6 text-blue-300" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold font-sans tracking-tight">
+                    Set Number of Weeks per Term
+                  </h3>
+                  <p className="text-xs text-blue-200/80 font-mono">
+                    Configure instructional week checkboxes for each academic term (Max: 12 Weeks)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingWeeksModalOpen(false)}
+                className="p-1.5 text-white/70 hover:text-white rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 min-h-0 overscroll-contain">
+              {/* Default Active Academic Term (On Page Load & Refresh) */}
+              <div className="bg-gradient-to-r from-amber-50 to-orange-50/50 border border-amber-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2">
+                    <Star className="w-4 h-4 text-amber-500 fill-amber-400 shrink-0" />
+                    <div>
+                      <span className="font-bold text-slate-900 text-xs font-mono uppercase tracking-wider">
+                        Default Current Academic Term
+                      </span>
+                      <p className="text-[11px] text-slate-600 font-mono">
+                        Saved in Firebase so the page automatically opens this term on load and refresh
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1.5 self-start sm:self-auto">
+                    <span className="text-[11px] font-mono font-bold text-amber-900 bg-amber-200/80 px-2.5 py-1 rounded-full border border-amber-300">
+                      Active: {activeDefaultTermId === 'term-1' ? '1st Term' : activeDefaultTermId === 'term-2' ? '2nd Term' : '3rd Term'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'term-1', name: '1st Academic Term' },
+                      { id: 'term-2', name: '2nd Academic Term' },
+                      { id: 'term-3', name: '3rd Academic Term' },
+                    ] as const
+                  ).map((t) => {
+                    const isCurrentDefault = activeDefaultTermId === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => handleSetCurrentActiveTerm(t.id)}
+                        disabled={isSettingActiveTerm}
+                        className={`px-3 py-2.5 rounded-xl text-xs font-mono font-bold flex items-center justify-between transition-all cursor-pointer border ${
+                          isCurrentDefault
+                            ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
+                            : 'bg-white hover:bg-amber-100 text-slate-700 border-slate-200 hover:border-amber-300'
+                        }`}
+                        title={`Click to set ${t.name} as the official default term saved in Firebase`}
+                      >
+                        <span className="flex items-center space-x-1.5">
+                          {isCurrentDefault ? (
+                            <Star className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
+                          ) : (
+                            <span className="w-2 h-2 rounded-full bg-slate-300" />
+                          )}
+                          <span>{t.name}</span>
+                        </span>
+                        {isCurrentDefault && (
+                          <span className="text-[10px] bg-slate-950/15 text-slate-950 px-1.5 py-0.5 rounded-md font-extrabold">
+                            Saved ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Presets & Auto-save Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-mono font-bold text-slate-500">Quick Presets:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cfg = { 'term-1': 11, 'term-2': 11, 'term-3': 11 };
+                      setTempWeeksConfig(cfg);
+                      if (autoSaveEnabled) {
+                        saveTermWeeksConfigToFirestore(cfg);
+                        setTermWeeksConfig(cfg);
+                        showToast('💾 Applied and auto-saved 11 Weeks preset to Firebase!');
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer"
+                  >
+                    Default 11 Wks
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cfg = { 'term-1': 10, 'term-2': 10, 'term-3': 10 };
+                      setTempWeeksConfig(cfg);
+                      if (autoSaveEnabled) {
+                        saveTermWeeksConfigToFirestore(cfg);
+                        setTermWeeksConfig(cfg);
+                        showToast('💾 Applied and auto-saved 10 Weeks preset to Firebase!');
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer"
+                  >
+                    10 Wks
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cfg = { 'term-1': 12, 'term-2': 12, 'term-3': 12 };
+                      setTempWeeksConfig(cfg);
+                      if (autoSaveEnabled) {
+                        saveTermWeeksConfigToFirestore(cfg);
+                        setTermWeeksConfig(cfg);
+                        showToast('💾 Applied and auto-saved 12 Weeks (Max) preset to Firebase!');
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer"
+                  >
+                    12 Wks (Max)
+                  </button>
+                </div>
+
+                {/* Auto-save Switch */}
+                <label className="flex items-center space-x-2 text-xs font-mono font-bold text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoSaveEnabled}
+                    onChange={(e) => setAutoSaveEnabled(e.target.checked)}
+                    className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Auto-save to Firebase on edit</span>
+                </label>
+              </div>
+
+              {/* Term Configurations with dedicated Save Buttons */}
+              <div className="space-y-4">
+                {(
+                  [
+                    { id: 'term-1' as const, name: '1st Academic Term', color: 'blue' },
+                    { id: 'term-2' as const, name: '2nd Academic Term', color: 'indigo' },
+                    { id: 'term-3' as const, name: '3rd Academic Term', color: 'purple' },
+                  ]
+                ).map((term) => {
+                  const weeks = tempWeeksConfig[term.id] || 11;
+                  const isSavingThisTerm = isSavingSingleTerm === term.id;
+                  const isSavedThisTerm = savedTermSuccess[term.id];
+
+                  return (
+                    <div
+                      key={term.id}
+                      className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900 text-sm font-sans flex items-center space-x-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />
+                          <span>{term.name}</span>
+                          {isSavedThisTerm && (
+                            <span className="bg-emerald-100 text-emerald-700 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 animate-fadeIn">
+                              <Check className="w-3 h-3" />
+                              <span>Saved to Firebase</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500 font-mono mt-0.5">
+                          Checkboxes: <strong className="text-blue-600 font-bold">W1 to W{weeks}</strong> ({weeks} instructional weeks)
+                        </div>
+                      </div>
+
+                      {/* Stepper, Number Selection & Dedicated Save Button */}
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        {/* Stepper */}
+                        <div className="flex items-center space-x-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickChangeTermWeeks(
+                                term.id,
+                                Math.max(MIN_TERM_WEEKS, (tempWeeksConfig[term.id] || 11) - 1)
+                              )
+                            }
+                            disabled={weeks <= MIN_TERM_WEEKS}
+                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                            title="Decrease weeks"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+
+                          <div className="w-10 text-center font-mono font-extrabold text-slate-900 text-base">
+                            {weeks}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickChangeTermWeeks(
+                                term.id,
+                                Math.min(MAX_TERM_WEEKS, (tempWeeksConfig[term.id] || 11) + 1)
+                              )
+                            }
+                            disabled={weeks >= MAX_TERM_WEEKS}
+                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                            title="Increase weeks"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Quick Number Pills (1 to 12) */}
+                        <select
+                          value={weeks}
+                          onChange={(e) =>
+                            handleQuickChangeTermWeeks(
+                              term.id,
+                              Number(e.target.value)
+                            )
+                          }
+                          aria-label={`Select weeks for ${term.name}`}
+                          className="bg-white border border-slate-200 text-slate-700 text-xs font-mono font-bold rounded-xl px-2.5 py-2 shadow-2xs cursor-pointer focus:outline-hidden"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((w) => (
+                            <option key={w} value={w}>
+                              {w} {w === 1 ? 'Week' : 'Weeks'}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* SAVE BUTTON PLACED RIGHT AFTER SETTING WEEKS FOR THIS TERM */}
+                        <button
+                          type="button"
+                          onClick={() => handleSaveSingleTermWeeks(term.id, weeks)}
+                          disabled={isSavingThisTerm}
+                          className={`px-3.5 py-2 text-xs font-mono font-bold rounded-xl transition-all shadow-2xs flex items-center space-x-1.5 cursor-pointer active:scale-95 border ${
+                            isSavedThisTerm
+                              ? 'bg-emerald-600 border-emerald-400 text-white'
+                              : 'bg-blue-600 hover:bg-blue-500 border-blue-400/40 text-white'
+                          }`}
+                          title={`Save ${term.name} (${weeks} weeks) permanently to Firebase`}
+                        >
+                          {isSavingThisTerm ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : isSavedThisTerm ? (
+                            <Check className="w-3.5 h-3.5 text-white" />
+                          ) : (
+                            <Save className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {isSavingThisTerm
+                              ? 'Saving...'
+                              : isSavedThisTerm
+                              ? 'Saved ✓'
+                              : `Save ${term.id === 'term-1' ? 'T1' : term.id === 'term-2' ? 'T2' : 'T3'}`}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Info Notice */}
+              <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-3.5 text-xs text-blue-900 font-mono flex items-start space-x-2.5">
+                <FileCheck2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Synchronized Dynamic Directory:</strong> Changing and saving the number of weeks automatically updates all DLL checkboxes, matrix tables, progress visualizers, and weekly trend graphs in real-time across both Admin and Faculty portals.
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer (Always visible & docked) */}
+            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center space-x-2 text-xs font-mono text-slate-500">
+                <Cloud className="w-4 h-4 text-blue-600" />
+                <span>
+                  {lastSavedTimestamp
+                    ? `Last synced with Firebase at ${lastSavedTimestamp}`
+                    : 'Changes are synced live to Firebase Firestore'}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center space-x-2.5 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsSettingWeeksModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-2xl text-xs font-mono font-bold transition-all flex items-center space-x-1.5 cursor-pointer active:scale-95 shadow-2xs"
+                  title="Exit weeks configuration and return to Faculty Submission Report"
+                >
+                  <LogOut className="w-4 h-4 text-slate-500" />
+                  <span>Exit & Return to Page</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveWeeksConfiguration}
+                  disabled={isSavingWeeksConfig}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white rounded-2xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-2 cursor-pointer active:scale-95 border border-blue-400/40"
+                >
+                  {isSavingWeeksConfig ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Saving All to Firebase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Save All Weeks to Firebase</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

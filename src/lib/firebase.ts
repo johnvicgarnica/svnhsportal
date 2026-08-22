@@ -1276,5 +1276,165 @@ export const subscribeFacultySchoolForms = (
   );
 };
 
+// 13. TERM WEEKS CONFIGURATION (Up to 12 weeks per term)
+export interface TermWeeksConfig {
+  'term-1': number;
+  'term-2': number;
+  'term-3': number;
+}
+
+export const DEFAULT_TERM_WEEKS_CONFIG: TermWeeksConfig = {
+  'term-1': 11,
+  'term-2': 11,
+  'term-3': 11,
+};
+
+export const MAX_TERM_WEEKS = 12;
+export const MIN_TERM_WEEKS = 1;
+
+const TERM_WEEKS_STORAGE_KEY = 'svnhs_term_weeks_config';
+
+export const getStoredTermWeeksConfig = (): TermWeeksConfig => {
+  try {
+    const raw = localStorage.getItem(TERM_WEEKS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(parsed['term-1']) || 11)),
+        'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(parsed['term-2']) || 11)),
+        'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(parsed['term-3']) || 11)),
+      };
+    }
+  } catch (e) {
+    console.error('Error reading term weeks config from localStorage:', e);
+  }
+  return DEFAULT_TERM_WEEKS_CONFIG;
+};
+
+export const saveTermWeeksConfigToLocalStorage = (config: TermWeeksConfig) => {
+  try {
+    localStorage.setItem(TERM_WEEKS_STORAGE_KEY, JSON.stringify(config));
+  } catch (e) {
+    console.error('Error saving term weeks config to localStorage:', e);
+  }
+};
+
+export const saveTermWeeksConfigToFirestore = async (config: TermWeeksConfig) => {
+  try {
+    const sanitized: TermWeeksConfig = {
+      'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(config['term-1']) || 11)),
+      'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(config['term-2']) || 11)),
+      'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(config['term-3']) || 11)),
+    };
+    saveTermWeeksConfigToLocalStorage(sanitized);
+    await setDoc(
+      doc(db, SETTINGS_COL, 'term_weeks_config'),
+      {
+        id: 'term_weeks_config',
+        ...sanitized,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving term weeks config to Firestore:', err);
+  }
+};
+
+export const subscribeTermWeeksConfig = (onUpdate: (config: TermWeeksConfig) => void) => {
+  return onSnapshot(
+    doc(db, SETTINGS_COL, 'term_weeks_config'),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        const config: TermWeeksConfig = {
+          'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-1']) || 11)),
+          'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-2']) || 11)),
+          'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-3']) || 11)),
+        };
+        saveTermWeeksConfigToLocalStorage(config);
+        onUpdate(config);
+      } else {
+        const cached = getStoredTermWeeksConfig();
+        onUpdate(cached);
+      }
+    },
+    (err) => {
+      console.error('Error subscribing to term weeks config:', err);
+      const cached = getStoredTermWeeksConfig();
+      onUpdate(cached);
+    }
+  );
+};
+
+// 14. ACTIVE ACADEMIC TERM CONFIGURATION (Default term remembered across page refreshes)
+export const ACTIVE_TERM_STORAGE_KEY = 'svnhs_active_academic_term';
+export const DEFAULT_ACTIVE_TERM_ID = 'term-1';
+
+export const getStoredActiveTermId = (): string => {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TERM_STORAGE_KEY);
+    if (raw && (raw === 'term-1' || raw === 'term-2' || raw === 'term-3')) {
+      return raw;
+    }
+  } catch (e) {
+    console.error('Error reading active academic term from localStorage:', e);
+  }
+  return DEFAULT_ACTIVE_TERM_ID;
+};
+
+export const saveActiveTermIdToLocalStorage = (termId: string) => {
+  try {
+    const valid = termId === 'term-2' || termId === 'term-3' ? termId : 'term-1';
+    localStorage.setItem(ACTIVE_TERM_STORAGE_KEY, valid);
+  } catch (e) {
+    console.error('Error saving active academic term to localStorage:', e);
+  }
+};
+
+export const saveActiveTermIdToFirestore = async (termId: string) => {
+  try {
+    const valid = termId === 'term-2' || termId === 'term-3' ? termId : 'term-1';
+    saveActiveTermIdToLocalStorage(valid);
+    await setDoc(
+      doc(db, SETTINGS_COL, 'active_academic_term'),
+      {
+        id: 'active_academic_term',
+        key: 'active_academic_term',
+        value: valid,
+        termId: valid,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving active academic term to Firestore:', err);
+  }
+};
+
+export const subscribeActiveTermId = (onUpdate: (termId: string) => void) => {
+  return onSnapshot(
+    doc(db, SETTINGS_COL, 'active_academic_term'),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        const termId = data.value || data.termId || DEFAULT_ACTIVE_TERM_ID;
+        const valid = termId === 'term-2' || termId === 'term-3' ? termId : 'term-1';
+        saveActiveTermIdToLocalStorage(valid);
+        onUpdate(valid);
+      } else {
+        const cached = getStoredActiveTermId();
+        onUpdate(cached);
+      }
+    },
+    (err) => {
+      console.error('Error subscribing to active academic term:', err);
+      const cached = getStoredActiveTermId();
+      onUpdate(cached);
+    }
+  );
+};
+
+
 
 
