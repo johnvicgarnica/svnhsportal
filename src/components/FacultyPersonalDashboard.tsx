@@ -362,7 +362,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               Welcome, {currentUser.name}
             </h1>
             <p className="text-blue-100 text-xs sm:text-sm font-medium max-w-2xl leading-relaxed">
-              Your personalized repository for Senior High School Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Only you have access to your personal folders.
+              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Only you have access to your personal folders.
             </p>
           </div>
 
