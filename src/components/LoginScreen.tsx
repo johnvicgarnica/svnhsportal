@@ -825,6 +825,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           </div>
         )}
 
+        {/* INSTITUTIONAL SECURITY & VERIFICATION NOTICE */}
+        <div className="pt-2 border-t border-slate-200 space-y-2">
+          <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 text-left space-y-1.5 shadow-2xs">
+            <div className="flex items-center space-x-1.5 text-slate-800">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="text-[11px] font-mono font-bold text-slate-900">
+                Official Academic Internal Platform
+              </span>
+            </div>
+            <p className="text-[10.5px] text-slate-600 leading-relaxed font-sans">
+              This system is an authorized internal curriculum and file repository for <strong>San Vicente National High School</strong> (School ID: <strong>304868</strong>, Division of Bislig City, CARAGA Region). It is operated strictly for teacher Daily Lesson Logs (DLL), Table of Specifications (TOS), and classroom instructional materials.
+            </p>
+            <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t border-slate-200/70 text-[9.5px] font-mono text-slate-500">
+              <span className="flex items-center space-x-1 text-emerald-800 font-semibold">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                <span>RA 10173 (Data Privacy Act) Compliant</span>
+              </span>
+              <span className="text-slate-500 font-bold">School ID: 304868</span>
+            </div>
+          </div>
+        </div>
+
       </div>
 
         {/* BOTTOM SECTION: Official Admin Announcements */}
@@ -940,6 +962,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
 
       </div>
+
+      {/* INSTITUTIONAL & SECURITY FOOTER */}
+      <footer className="w-full max-w-6xl mt-6 pt-4 pb-2 border-t border-slate-300/80 text-center relative z-10 space-y-2">
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] font-mono font-semibold text-slate-700">
+          <span>Republic of the Philippines</span>
+          <span className="text-slate-300">•</span>
+          <span>Department of Education</span>
+          <span className="text-slate-300">•</span>
+          <span>Region XIII (CARAGA)</span>
+          <span className="text-slate-300">•</span>
+          <span>Division of Bislig City</span>
+          <span className="text-slate-300">•</span>
+          <span className="text-emerald-800 font-bold">San Vicente NHS (School ID: 304868)</span>
+        </div>
+        <p className="text-[10px] text-slate-500 max-w-3xl mx-auto leading-relaxed font-sans">
+          <strong>Institutional Privacy & Security Notice:</strong> This web portal is an internal academic repository engineered exclusively for authorized faculty and administrative staff of San Vicente National High School. All submitted records, Daily Lesson Logs, and user credentials are encrypted and protected under Republic Act No. 10173 (Data Privacy Act of 2012). This application does not collect financial details or commercial consumer information.
+        </p>
+      </footer>
 
       {/* MODAL: FACULTY ACCOUNT SELF-REGISTRATION REQUEST */}
       {isRegisterOpen && (
