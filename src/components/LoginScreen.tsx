@@ -449,7 +449,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     <div className="min-h-screen bg-slate-100/90 text-slate-800 flex flex-col justify-center items-center px-2 sm:px-6 py-4 sm:py-6 relative overflow-hidden font-sans">
       {/* Background Image Layer with Controlled Opacity */}
       <div 
-        className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-100 mix-blend-multiply"
+        className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-50 mix-blend-multiply"
         style={{ backgroundImage: `url(${buildingBg})` }}
       />
       {/* Soft Light Backdrop Tint */}
