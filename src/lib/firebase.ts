@@ -848,6 +848,7 @@ export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) =
 
 // 10. FACULTY WEEKLY SUBMISSION REPORTS (DLL, TOS, TQ - 11 WEEKS PER TERM)
 export type SubmissionCategory = 'dll' | 'tos' | 'tq';
+export type ItemSubmissionStatus = 'unchecked' | 'checked' | 'with-comments' | 'incomplete';
 
 export const getCategoryCollectionName = (category: SubmissionCategory = 'dll') => {
   if (category === 'tos') return 'facultySubmissions_tos';
@@ -857,6 +858,14 @@ export const getCategoryCollectionName = (category: SubmissionCategory = 'dll') 
 
 export const getCategoryStorageKey = (category: SubmissionCategory = 'dll') => {
   return `svnhs_faculty_sub_${category}_cache_v1`;
+};
+
+export const getCategoryStatusStorageKey = (category: SubmissionCategory = 'dll') => {
+  return `svnhs_faculty_status_${category}_cache_v1`;
+};
+
+export const getCategoryCommentsStorageKey = (category: SubmissionCategory = 'dll') => {
+  return `svnhs_faculty_comments_${category}_cache_v1`;
 };
 
 export const getStoredFacultySubmissions = (
@@ -896,13 +905,69 @@ export const saveFacultySubmissionsToLocalStorage = (
   }
 };
 
+export const getStoredFacultyStatuses = (
+  termId: string,
+  category: SubmissionCategory = 'dll'
+): Record<string, ItemSubmissionStatus[]> => {
+  try {
+    const raw = localStorage.getItem(`${getCategoryStatusStorageKey(category)}_${termId}`);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error(`Error reading faculty ${category} statuses from localStorage:`, e);
+  }
+  return {};
+};
+
+export const saveFacultyStatusesToLocalStorage = (
+  termId: string,
+  category: SubmissionCategory = 'dll',
+  data: Record<string, ItemSubmissionStatus[]>
+) => {
+  try {
+    localStorage.setItem(`${getCategoryStatusStorageKey(category)}_${termId}`, JSON.stringify(data));
+  } catch (e) {
+    console.error(`Error saving faculty ${category} statuses to localStorage:`, e);
+  }
+};
+
+export const getStoredFacultyComments = (
+  termId: string,
+  category: SubmissionCategory = 'dll'
+): Record<string, Record<string, string>> => {
+  try {
+    const raw = localStorage.getItem(`${getCategoryCommentsStorageKey(category)}_${termId}`);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error(`Error reading faculty ${category} comments from localStorage:`, e);
+  }
+  return {};
+};
+
+export const saveFacultyCommentsToLocalStorage = (
+  termId: string,
+  category: SubmissionCategory = 'dll',
+  data: Record<string, Record<string, string>>
+) => {
+  try {
+    localStorage.setItem(`${getCategoryCommentsStorageKey(category)}_${termId}`, JSON.stringify(data));
+  } catch (e) {
+    console.error(`Error saving faculty ${category} comments to localStorage:`, e);
+  }
+};
+
 export const saveFacultySubmissionToFirestore = async (
   termId: string,
   category: SubmissionCategory = 'dll',
   facultyEmail: string,
   weeks: boolean[],
   facultyName?: string,
-  department?: string
+  department?: string,
+  statuses?: ItemSubmissionStatus[],
+  comments?: Record<string, string>
 ) => {
   try {
     const cleanEmail = facultyEmail.toLowerCase().trim();
@@ -914,7 +979,19 @@ export const saveFacultySubmissionToFirestore = async (
     currentCached[cleanEmail] = weeks;
     saveFacultySubmissionsToLocalStorage(termId, category, currentCached);
 
-    const docPayload = {
+    if (statuses) {
+      const cachedStatuses = getStoredFacultyStatuses(termId, category);
+      cachedStatuses[cleanEmail] = statuses;
+      saveFacultyStatusesToLocalStorage(termId, category, cachedStatuses);
+    }
+
+    if (comments) {
+      const cachedComments = getStoredFacultyComments(termId, category);
+      cachedComments[cleanEmail] = comments;
+      saveFacultyCommentsToLocalStorage(termId, category, cachedComments);
+    }
+
+    const docPayload: Record<string, any> = {
       id: docId,
       termId,
       category,
@@ -924,6 +1001,13 @@ export const saveFacultySubmissionToFirestore = async (
       weeks: Array.isArray(weeks) ? [...weeks] : [],
       updatedAt: new Date().toISOString(),
     };
+
+    if (statuses && Array.isArray(statuses)) {
+      docPayload.statuses = [...statuses];
+    }
+    if (comments && typeof comments === 'object') {
+      docPayload.comments = { ...comments };
+    }
 
     // Save to category collection
     await setDoc(doc(db, colName, docId), docPayload, { merge: true });
@@ -941,16 +1025,21 @@ export const saveFacultySubmissionToFirestore = async (
 export const batchSaveFacultySubmissionsToFirestore = async (
   termId: string,
   category: SubmissionCategory = 'dll',
-  submissions: Record<string, boolean[]>
+  submissions: Record<string, boolean[]>,
+  statuses?: Record<string, ItemSubmissionStatus[]>,
+  comments?: Record<string, Record<string, string>>
 ) => {
   try {
     saveFacultySubmissionsToLocalStorage(termId, category, submissions);
+    if (statuses) saveFacultyStatusesToLocalStorage(termId, category, statuses);
+    if (comments) saveFacultyCommentsToLocalStorage(termId, category, comments);
+
     const colName = getCategoryCollectionName(category);
 
     const promises = Object.entries(submissions).map(([email, weeks]) => {
       const cleanEmail = email.toLowerCase().trim();
       const docId = `${termId}_${emailToDocId(cleanEmail)}`;
-      const docPayload = {
+      const docPayload: Record<string, any> = {
         id: docId,
         termId,
         category,
@@ -958,6 +1047,12 @@ export const batchSaveFacultySubmissionsToFirestore = async (
         weeks: Array.isArray(weeks) ? [...weeks] : [],
         updatedAt: new Date().toISOString(),
       };
+      if (statuses && statuses[cleanEmail]) {
+        docPayload.statuses = [...statuses[cleanEmail]];
+      }
+      if (comments && comments[cleanEmail]) {
+        docPayload.comments = { ...comments[cleanEmail] };
+      }
       return setDoc(doc(db, colName, docId), docPayload, { merge: true });
     });
 
@@ -973,10 +1068,15 @@ export const saveWeekDataToFirestore = async (
   category: SubmissionCategory = 'dll',
   weekIndex: number,
   submissions: Record<string, boolean[]>,
-  facultyList: { email: string; name?: string; department?: string }[]
+  facultyList: { email: string; name?: string; department?: string }[],
+  statuses?: Record<string, ItemSubmissionStatus[]>,
+  comments?: Record<string, Record<string, string>>
 ) => {
   try {
     saveFacultySubmissionsToLocalStorage(termId, category, submissions);
+    if (statuses) saveFacultyStatusesToLocalStorage(termId, category, statuses);
+    if (comments) saveFacultyCommentsToLocalStorage(termId, category, comments);
+
     const colName = getCategoryCollectionName(category);
 
     const promises = facultyList.map((f) => {
@@ -984,7 +1084,7 @@ export const saveWeekDataToFirestore = async (
       const docId = `${termId}_${emailToDocId(cleanEmail)}`;
       const weeks = submissions[cleanEmail] || Array(MAX_TERM_WEEKS).fill(false);
 
-      const docPayload = {
+      const docPayload: Record<string, any> = {
         id: docId,
         termId,
         category,
@@ -995,6 +1095,13 @@ export const saveWeekDataToFirestore = async (
         lastSavedWeek: weekIndex + 1,
         updatedAt: new Date().toISOString(),
       };
+
+      if (statuses && statuses[cleanEmail]) {
+        docPayload.statuses = [...statuses[cleanEmail]];
+      }
+      if (comments && comments[cleanEmail]) {
+        docPayload.comments = { ...comments[cleanEmail] };
+      }
 
       return setDoc(doc(db, colName, docId), docPayload, { merge: true });
     });
@@ -1009,7 +1116,11 @@ export const saveWeekDataToFirestore = async (
 export const subscribeFacultySubmissions = (
   termId: string,
   category: SubmissionCategory = 'dll',
-  onUpdate: (submissionsMap: Record<string, boolean[]>) => void
+  onUpdate: (
+    submissionsMap: Record<string, boolean[]>,
+    statusesMap?: Record<string, ItemSubmissionStatus[]>,
+    commentsMap?: Record<string, Record<string, string>>
+  ) => void
 ) => {
   const colName = getCategoryCollectionName(category);
 
@@ -1017,10 +1128,25 @@ export const subscribeFacultySubmissions = (
     collection(db, colName),
     (snapshot) => {
       const map: Record<string, boolean[]> = {};
+      const statusMap: Record<string, ItemSubmissionStatus[]> = {};
+      const commentMap: Record<string, Record<string, string>> = {};
+
       snapshot.docs.forEach((d) => {
         const data = d.data();
-        if (data.termId === termId && data.facultyEmail && Array.isArray(data.weeks)) {
-          map[data.facultyEmail.toLowerCase().trim()] = data.weeks;
+        if (data.termId === termId && data.facultyEmail) {
+          const emailKey = data.facultyEmail.toLowerCase().trim();
+          if (Array.isArray(data.weeks)) {
+            map[emailKey] = data.weeks;
+          }
+          if (Array.isArray(data.statuses)) {
+            statusMap[emailKey] = data.statuses;
+          } else if (Array.isArray(data.weeks)) {
+            // Derive statuses from weeks for backward compatibility
+            statusMap[emailKey] = data.weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
+          }
+          if (data.comments && typeof data.comments === 'object') {
+            commentMap[emailKey] = data.comments;
+          }
         }
       });
 
@@ -1028,7 +1154,9 @@ export const subscribeFacultySubmissions = (
       if (category === 'dll' && Object.keys(map).length === 0) {
         const localCached = getStoredFacultySubmissions(termId, 'dll');
         const merged = { ...localCached, ...map };
-        onUpdate(merged);
+        const localStatuses = getStoredFacultyStatuses(termId, 'dll');
+        const localComments = getStoredFacultyComments(termId, 'dll');
+        onUpdate(merged, localStatuses, localComments);
         return;
       }
 
@@ -1037,12 +1165,22 @@ export const subscribeFacultySubmissions = (
       const merged = { ...localCached, ...map };
       saveFacultySubmissionsToLocalStorage(termId, category, merged);
 
-      onUpdate(merged);
+      const localCachedStatuses = getStoredFacultyStatuses(termId, category);
+      const mergedStatuses = { ...localCachedStatuses, ...statusMap };
+      saveFacultyStatusesToLocalStorage(termId, category, mergedStatuses);
+
+      const localCachedComments = getStoredFacultyComments(termId, category);
+      const mergedComments = { ...localCachedComments, ...commentMap };
+      saveFacultyCommentsToLocalStorage(termId, category, mergedComments);
+
+      onUpdate(merged, mergedStatuses, mergedComments);
     },
     (err) => {
       console.error(`Error subscribing to faculty ${category} submissions:`, err);
       const cached = getStoredFacultySubmissions(termId, category);
-      onUpdate(cached);
+      const cachedStatuses = getStoredFacultyStatuses(termId, category);
+      const cachedComments = getStoredFacultyComments(termId, category);
+      onUpdate(cached, cachedStatuses, cachedComments);
     }
   );
 };

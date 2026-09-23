@@ -7,9 +7,14 @@ import {
   batchSaveFacultySubmissionsToFirestore,
   saveWeekDataToFirestore,
   getStoredFacultySubmissions,
+  getStoredFacultyStatuses,
+  getStoredFacultyComments,
+  saveFacultyStatusesToLocalStorage,
+  saveFacultyCommentsToLocalStorage,
   extractFacultySurname,
   FacultyDoc,
   SubmissionCategory,
+  ItemSubmissionStatus,
   TermWeeksConfig,
   DEFAULT_TERM_WEEKS_CONFIG,
   MAX_TERM_WEEKS,
@@ -72,6 +77,8 @@ import {
   BookmarkCheck,
   LogOut,
   ArrowLeft,
+  MessageSquare,
+  Info,
 } from 'lucide-react';
 
 interface SubmissionReportViewProps {
@@ -157,7 +164,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [isSettingActiveTerm, setIsSettingActiveTerm] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'in-progress' | 'none'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'with-comments' | 'incomplete' | 'in-progress' | 'none'>('all');
   const [viewMode, setViewMode] = useState<'faculty-chart' | 'weekly-chart' | 'pie-chart'>('faculty-chart');
   const [facultyPieTab, setFacultyPieTab] = useState<'both' | 'compliance' | 'volume' | 'periods'>('both');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
@@ -223,6 +230,37 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return getStoredFacultySubmissions(getStoredActiveTermId(), 'dll');
   });
 
+  // Statuses map: key is facultyEmail, value is ItemSubmissionStatus array ('unchecked' | 'checked' | 'with-comments')
+  const [itemStatuses, setItemStatuses] = useState<Record<string, ItemSubmissionStatus[]>>(() => {
+    return getStoredFacultyStatuses(getStoredActiveTermId(), 'dll');
+  });
+
+  // Comments map: key is facultyEmail, value is Record<string, string> mapping item index to comment
+  const [itemComments, setItemComments] = useState<Record<string, Record<string, string>>>(() => {
+    return getStoredFacultyComments(getStoredActiveTermId(), 'dll');
+  });
+
+  // Admin Box Click Modal: allows admin to select 'Checked' (No Comments) vs 'With Comments'
+  const [activeCellAction, setActiveCellAction] = useState<{
+    facultyEmail: string;
+    facultyName: string;
+    facultySurname: string;
+    department: string;
+    itemIndex: number;
+    colLabel: string;
+    currentStatus: ItemSubmissionStatus;
+    currentComment: string;
+  } | null>(null);
+  const [selectedActionType, setSelectedActionType] = useState<ItemSubmissionStatus>('checked');
+  const [commentInput, setCommentInput] = useState<string>('');
+
+  // Faculty Modal: allows faculty to view full comments on their items
+  const [facultyDetailModal, setFacultyDetailModal] = useState<{
+    colLabel: string;
+    status: ItemSubmissionStatus;
+    comment: string;
+  } | null>(null);
+
   // Subscribe to faculty list
   useEffect(() => {
     const unsub = subscribeFaculty((list) => {
@@ -234,15 +272,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Subscribe to faculty submissions whenever category or term changes
   useEffect(() => {
-    const cached = getStoredFacultySubmissions(effectiveTermId, activeCategory);
-    if (Object.keys(cached).length > 0) {
-      setSubmissions(cached);
-    } else {
-      setSubmissions({});
-    }
+    const cachedSub = getStoredFacultySubmissions(effectiveTermId, activeCategory);
+    const cachedStat = getStoredFacultyStatuses(effectiveTermId, activeCategory);
+    const cachedComm = getStoredFacultyComments(effectiveTermId, activeCategory);
 
-    const unsub = subscribeFacultySubmissions(effectiveTermId, activeCategory, (data) => {
-      setSubmissions(data || {});
+    setSubmissions(cachedSub || {});
+    setItemStatuses(cachedStat || {});
+    setItemComments(cachedComm || {});
+
+    const unsub = subscribeFacultySubmissions(effectiveTermId, activeCategory, (subs, stats, comms) => {
+      setSubmissions(subs || {});
+      if (stats) setItemStatuses(stats);
+      if (comms) setItemComments(comms);
     });
 
     return () => unsub();
@@ -442,31 +483,102 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     }
   };
 
-  // Handle single checkbox toggle (Optimistic + Firebase Firestore sync)
+  // Item status & comment helpers
+  const getItemStatus = (email: string, index: number): ItemSubmissionStatus => {
+    const cleanEmail = email.toLowerCase().trim();
+    const fStatuses = itemStatuses[cleanEmail];
+    if (fStatuses && fStatuses[index]) {
+      return fStatuses[index];
+    }
+    const fWeeks = submissions[cleanEmail];
+    if (fWeeks && fWeeks[index]) {
+      return 'checked';
+    }
+    return 'unchecked';
+  };
+
+  const getItemComment = (email: string, index: number): string => {
+    const cleanEmail = email.toLowerCase().trim();
+    const fComments = itemComments[cleanEmail];
+    if (fComments) {
+      return fComments[String(index)] || fComments[index] || '';
+    }
+    return '';
+  };
+
+  // Open the review options modal for a specific box (Admin)
+  const handleOpenCellAction = (
+    faculty: { email: string; name: string; surname: string; department: string },
+    col: { index: number; fullLabel: string }
+  ) => {
+    if (!isAdmin) return;
+    const currentStatus = getItemStatus(faculty.email, col.index);
+    const currentComment = getItemComment(faculty.email, col.index);
+    setActiveCellAction({
+      facultyEmail: faculty.email,
+      facultyName: faculty.name,
+      facultySurname: faculty.surname,
+      department: faculty.department,
+      itemIndex: col.index,
+      colLabel: col.fullLabel,
+      currentStatus,
+      currentComment,
+    });
+    // Default to 'checked' if currently unchecked, or keep existing status
+    setSelectedActionType(currentStatus === 'unchecked' ? 'checked' : currentStatus);
+    setCommentInput(currentComment || '');
+  };
+
+  // Save selected status and comments for a specific box
   const [autoSavingItemKey, setAutoSavingItemKey] = useState<string | null>(null);
 
-  const handleToggleItem = async (facultyEmail: string, itemIndex: number) => {
+  const handleSaveCellStatus = async (
+    facultyEmail: string,
+    itemIndex: number,
+    newStatus: ItemSubmissionStatus,
+    commentText: string
+  ) => {
     if (!isAdmin) return;
 
     const cleanEmail = facultyEmail.toLowerCase().trim();
-    const currentItems = submissions[cleanEmail] ? [...submissions[cleanEmail]] : Array(totalItemCount).fill(false);
+    const currentWeeks = submissions[cleanEmail] ? [...submissions[cleanEmail]] : Array(totalItemCount).fill(false);
+    while (currentWeeks.length < totalItemCount) {
+      currentWeeks.push(false);
+    }
+    currentWeeks[itemIndex] = newStatus !== 'unchecked';
 
-    while (currentItems.length < totalItemCount) {
-      currentItems.push(false);
+    const currentStatuses: ItemSubmissionStatus[] = itemStatuses[cleanEmail]
+      ? [...itemStatuses[cleanEmail]]
+      : Array(totalItemCount).fill('unchecked' as ItemSubmissionStatus);
+    while (currentStatuses.length < totalItemCount) {
+      currentStatuses.push('unchecked');
+    }
+    currentStatuses[itemIndex] = newStatus;
+
+    const currentComments: Record<string, string> = itemComments[cleanEmail]
+      ? { ...itemComments[cleanEmail] }
+      : {};
+    if (newStatus === 'with-comments' || newStatus === 'incomplete') {
+      currentComments[String(itemIndex)] = commentText.trim();
+    } else {
+      delete currentComments[String(itemIndex)];
+      delete currentComments[itemIndex];
     }
 
-    const nextValue = !currentItems[itemIndex];
-    currentItems[itemIndex] = nextValue;
-
-    const updated = {
-      ...submissions,
-      [cleanEmail]: currentItems,
-    };
-    setSubmissions(updated);
+    setSubmissions((prev) => ({ ...prev, [cleanEmail]: currentWeeks }));
+    setItemStatuses((prev) => ({ ...prev, [cleanEmail]: currentStatuses }));
+    setItemComments((prev) => ({ ...prev, [cleanEmail]: currentComments }));
 
     const facultyObj = allFaculty.find((f) => f.email === cleanEmail);
     const colName = columnItems[itemIndex]?.fullLabel || `Item ${itemIndex + 1}`;
-    const statusLabel = nextValue ? 'Checked (Submitted)' : 'Unchecked (Pending)';
+    const statusLabel =
+      newStatus === 'checked'
+        ? 'Checked (No Comments)'
+        : newStatus === 'with-comments'
+        ? 'With Comments (Corrections)'
+        : newStatus === 'incomplete'
+        ? 'Incomplete (Lacking Requirements)'
+        : 'Unchecked (Pending)';
     const itemKey = `${cleanEmail}_${itemIndex}`;
 
     setAutoSavingItemKey(itemKey);
@@ -475,15 +587,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         effectiveTermId,
         activeCategory,
         cleanEmail,
-        currentItems,
+        currentWeeks,
         facultyObj?.name,
-        facultyObj?.department
+        facultyObj?.department,
+        currentStatuses,
+        currentComments
       );
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastSavedTimestamp(timeStr);
       showToast(`☁️ Auto-saved: ${facultyObj?.surname || cleanEmail} • ${colName} (${statusLabel})`);
     } catch (err) {
-      console.error('Error auto-saving checkbox to Firebase Firestore:', err);
+      console.error('Error auto-saving item status to Firebase Firestore:', err);
       showToast(`⚠️ Failed to auto-save ${colName} to Firebase`);
     } finally {
       setTimeout(() => {
@@ -492,30 +606,46 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     }
   };
 
+  // Legacy direct toggle handler: redirects to handleOpenCellAction for full options
+  const handleToggleItem = async (facultyEmail: string, itemIndex: number) => {
+    if (!isAdmin) return;
+    const facultyObj = allFaculty.find((f) => f.email.toLowerCase().trim() === facultyEmail.toLowerCase().trim());
+    const colObj = columnItems[itemIndex];
+    if (facultyObj && colObj) {
+      handleOpenCellAction(facultyObj, colObj);
+    }
+  };
+
   // Check all items for a single faculty member
   const handleCheckAllItems = async (facultyEmail: string, checkValue: boolean) => {
     if (!isAdmin) return;
 
     const cleanEmail = facultyEmail.toLowerCase().trim();
-    const currentItems = Array(totalItemCount).fill(checkValue);
+    const currentWeeks = Array(totalItemCount).fill(checkValue);
+    const currentStatuses: ItemSubmissionStatus[] = Array(totalItemCount).fill(
+      checkValue ? ('checked' as ItemSubmissionStatus) : ('unchecked' as ItemSubmissionStatus)
+    );
+    const currentComments: Record<string, string> = checkValue ? (itemComments[cleanEmail] || {}) : {};
 
-    const updated = {
-      ...submissions,
-      [cleanEmail]: currentItems,
-    };
-    setSubmissions(updated);
+    setSubmissions((prev) => ({ ...prev, [cleanEmail]: currentWeeks }));
+    setItemStatuses((prev) => ({ ...prev, [cleanEmail]: currentStatuses }));
+    if (!checkValue) {
+      setItemComments((prev) => ({ ...prev, [cleanEmail]: {} }));
+    }
 
     const facultyObj = allFaculty.find((f) => f.email === cleanEmail);
-    const actionLabel = checkValue ? 'All items checked' : 'All items cleared';
+    const actionLabel = checkValue ? 'All items checked (No Comments)' : 'All items cleared';
 
     try {
       await saveFacultySubmissionToFirestore(
         effectiveTermId,
         activeCategory,
         cleanEmail,
-        currentItems,
+        currentWeeks,
         facultyObj?.name,
-        facultyObj?.department
+        facultyObj?.department,
+        currentStatuses,
+        !checkValue ? {} : currentComments
       );
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastSavedTimestamp(timeStr);
@@ -537,7 +667,9 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         activeCategory,
         itemIndex,
         submissions,
-        allFaculty.map((f) => ({ email: f.email, name: f.name, department: f.department }))
+        allFaculty.map((f) => ({ email: f.email, name: f.name, department: f.department })),
+        itemStatuses,
+        itemComments
       );
       setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       showToast(`☁️ ${itemObj?.fullLabel} data saved to Firebase Firestore for retention!`);
@@ -554,7 +686,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     if (!isAdmin) return;
     setIsSavingAll(true);
     try {
-      await batchSaveFacultySubmissionsToFirestore(effectiveTermId, activeCategory, submissions);
+      await batchSaveFacultySubmissionsToFirestore(
+        effectiveTermId,
+        activeCategory,
+        submissions,
+        itemStatuses,
+        itemComments
+      );
       setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       showToast(`☁️ All ${currentCategory.name} records saved to Firebase Firestore successfully!`);
     } catch (e) {
@@ -581,26 +719,61 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       let matchStatus = true;
       if (statusFilter === 'complete') matchStatus = count === totalItemCount;
+      else if (statusFilter === 'with-comments') {
+        const cleanEmail = f.email.toLowerCase().trim();
+        const fStatuses = itemStatuses[cleanEmail] || [];
+        matchStatus = fStatuses.slice(0, totalItemCount).some((s) => s === 'with-comments');
+      }
+      else if (statusFilter === 'incomplete') {
+        const cleanEmail = f.email.toLowerCase().trim();
+        const fStatuses = itemStatuses[cleanEmail] || [];
+        matchStatus = fStatuses.slice(0, totalItemCount).some((s) => s === 'incomplete');
+      }
       else if (statusFilter === 'in-progress') matchStatus = count > 0 && count < totalItemCount;
       else if (statusFilter === 'none') matchStatus = count === 0;
 
       return matchSearch && matchDept && matchStatus;
     });
-  }, [allFaculty, searchTerm, departmentFilter, statusFilter, submissions, totalItemCount]);
+  }, [allFaculty, searchTerm, departmentFilter, statusFilter, submissions, itemStatuses, totalItemCount]);
 
   // Calculate Progress Stats
   const stats = useMemo(() => {
     const totalPossible = allFaculty.length * totalItemCount;
     let totalCompleted = 0;
+    let totalCleanChecked = 0;
+    let totalWithComments = 0;
+    let totalIncomplete = 0;
     let completedFacultyCount = 0;
     let inProgressFacultyCount = 0;
     let noSubmissionFacultyCount = 0;
+    let facultyWithCommentsCount = 0;
+    let facultyWithIncompleteCount = 0;
 
     allFaculty.forEach((f) => {
-      const items = submissions[f.email] || Array(totalItemCount).fill(false);
+      const cleanEmail = f.email.toLowerCase().trim();
+      const items = submissions[cleanEmail] || Array(totalItemCount).fill(false);
       const visibleSlice = items.slice(0, totalItemCount);
       const count = visibleSlice.filter(Boolean).length;
       totalCompleted += count;
+
+      const fStatuses = itemStatuses[cleanEmail] || [];
+      let fHasComments = false;
+      let fHasIncomplete = false;
+      for (let i = 0; i < totalItemCount; i++) {
+        const st: ItemSubmissionStatus = fStatuses[i] || (visibleSlice[i] ? 'checked' : 'unchecked');
+        if (st === 'checked') {
+          totalCleanChecked++;
+        } else if (st === 'with-comments') {
+          totalWithComments++;
+          fHasComments = true;
+        } else if (st === 'incomplete') {
+          totalIncomplete++;
+          fHasIncomplete = true;
+        }
+      }
+
+      if (fHasComments) facultyWithCommentsCount++;
+      if (fHasIncomplete) facultyWithIncompleteCount++;
       if (count === totalItemCount) completedFacultyCount++;
       else if (count > 0) inProgressFacultyCount++;
       else noSubmissionFacultyCount++;
@@ -613,12 +786,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       totalFaculty: allFaculty.length,
       totalPossible,
       totalCompleted,
+      totalCleanChecked,
+      totalWithComments,
+      totalIncomplete,
+      facultyWithCommentsCount,
+      facultyWithIncompleteCount,
       completedFacultyCount,
       inProgressFacultyCount,
       noSubmissionFacultyCount,
       overallPercentage,
     };
-  }, [allFaculty, submissions, totalItemCount]);
+  }, [allFaculty, submissions, itemStatuses, totalItemCount]);
 
   // My personal submission status (for registered faculty)
   const myStatus = useMemo(() => {
@@ -627,13 +805,44 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     const visibleSlice = items.slice(0, totalItemCount);
     const count = visibleSlice.filter(Boolean).length;
     const pct = Math.round((count / totalItemCount) * 100);
+
+    const fStatuses = itemStatuses[userEmail] || [];
+    const fComments = itemComments[userEmail] || {};
+
+    let cleanCheckedCount = 0;
+    let withCommentsCount = 0;
+    let incompleteCount = 0;
+    const itemsStatuses: ItemSubmissionStatus[] = [];
+    const itemsCommentsList: string[] = [];
+
+    for (let i = 0; i < totalItemCount; i++) {
+      const st: ItemSubmissionStatus = fStatuses[i] || (visibleSlice[i] ? 'checked' : 'unchecked');
+      itemsStatuses.push(st);
+      const comm = fComments[String(i)] || fComments[i] || '';
+      itemsCommentsList.push(comm);
+
+      if (st === 'checked') cleanCheckedCount++;
+      else if (st === 'with-comments') withCommentsCount++;
+      else if (st === 'incomplete') incompleteCount++;
+    }
+
+    const pendingCount = Math.max(0, totalItemCount - count);
+
     return {
       itemsSubmitted: count,
       totalItems: totalItemCount,
       percentage: pct,
       items: visibleSlice,
+      cleanCheckedCount,
+      withCommentsCount,
+      incompleteCount,
+      pendingCount,
+      itemsStatuses,
+      itemsComments: itemsCommentsList,
+      hasComments: withCommentsCount > 0,
+      hasIncomplete: incompleteCount > 0,
     };
-  }, [currentUser, submissions, totalItemCount]);
+  }, [currentUser, submissions, itemStatuses, itemComments, totalItemCount]);
 
   // Chart Data: Progress per Faculty
   const facultyChartData = useMemo(() => {
@@ -708,27 +917,45 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return nonZero.length > 0 ? nonZero : data;
   }, [stats, totalItemCount, isWeeklyCategory]);
 
-  // Pie Chart Dataset 2: Deliverables Volume (Submitted vs Pending items)
+  // Pie Chart Dataset 2: Deliverables Volume (Checked vs With Comments vs Pending items)
   const volumePieData = useMemo(() => {
     const pendingItems = Math.max(0, stats.totalPossible - stats.totalCompleted);
-    return [
+    const data = [
       {
-        name: 'Submitted Deliverables',
-        shortName: 'Submitted',
-        value: stats.totalCompleted,
-        color: '#3B82F6', // Blue 500
-        percentage: stats.overallPercentage,
-        description: `Recorded deliverables across the department`,
+        name: 'Checked (No Comments)',
+        shortName: 'Checked',
+        value: stats.totalCleanChecked,
+        color: '#10B981', // Emerald 500
+        percentage: stats.totalPossible > 0 ? Math.round((stats.totalCleanChecked / stats.totalPossible) * 100) : 0,
+        description: `Reviewed and approved with no corrections needed`,
+      },
+      {
+        name: 'With Comments (Corrections)',
+        shortName: 'With Comments',
+        value: stats.totalWithComments,
+        color: '#F59E0B', // Amber 500
+        percentage: stats.totalPossible > 0 ? Math.round((stats.totalWithComments / stats.totalPossible) * 100) : 0,
+        description: `Deliverables marked with feedback or corrections`,
+      },
+      {
+        name: 'Incomplete (Lacking)',
+        shortName: 'Incomplete',
+        value: stats.totalIncomplete,
+        color: '#EF4444', // Rose / Red 500
+        percentage: stats.totalPossible > 0 ? Math.round((stats.totalIncomplete / stats.totalPossible) * 100) : 0,
+        description: `Deliverables marked lacking required components or attachments`,
       },
       {
         name: 'Pending Deliverables',
         shortName: 'Pending',
         value: pendingItems,
-        color: '#E2E8F0', // Slate 200
-        percentage: 100 - stats.overallPercentage,
-        description: `Deliverables awaiting submission`,
+        color: '#CBD5E1', // Slate 300
+        percentage: stats.totalPossible > 0 ? Math.round((pendingItems / stats.totalPossible) * 100) : 0,
+        description: `Deliverables awaiting submission or checking`,
       },
     ];
+    const nonZero = data.filter((d) => d.value > 0);
+    return nonZero.length > 0 ? nonZero : data;
   }, [stats]);
 
   // Pie Chart Dataset 3: Deliverable Distribution by Period (Weeks or Terms)
@@ -766,25 +993,29 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         'Period',
         'Total Registered Teachers',
         'Overall Compliance %',
-        '100% Completed Teachers',
-        'In Progress Teachers',
-        'Pending Teachers',
-        'Total Deliverables Submitted',
-        'Total Deliverables Target',
+        'Total Clean Checked',
+        'Total With Comments',
+        'Total Incomplete',
+        'Pending Deliverables',
         'My Personal Submissions',
-        'My Personal Compliance %',
+        'My Clean Checked',
+        'My With Comments',
+        'My Incomplete',
+        'My Compliance %',
       ];
       const row = [
         `"${currentCategory.name}"`,
         `"${effectiveTermId}"`,
         stats.totalFaculty,
         `"${stats.overallPercentage}%"`,
-        stats.completedFacultyCount,
-        stats.inProgressFacultyCount,
-        stats.noSubmissionFacultyCount,
-        stats.totalCompleted,
-        stats.totalPossible,
+        stats.totalCleanChecked,
+        stats.totalWithComments,
+        stats.totalIncomplete,
+        Math.max(0, stats.totalPossible - stats.totalCompleted),
         `"${myStatus.itemsSubmitted}/${totalItemCount}"`,
+        myStatus.cleanCheckedCount,
+        myStatus.withCommentsCount,
+        myStatus.incompleteCount,
         `"${myStatus.percentage}%"`,
       ];
 
@@ -814,15 +1045,44 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       'Email',
       'Department',
       ...columnItems.map((col) => col.fullLabel),
-      `Total Completed (of ${totalItemCount})`,
+      `Total Submissions (of ${totalItemCount})`,
+      'Checked (Clean)',
+      'With Comments',
+      'Incomplete (Lacking)',
       'Completion %',
     ];
     const rows = allFaculty.map((f) => {
-      const items = submissions[f.email] || Array(totalItemCount).fill(false);
+      const cleanEmail = f.email.toLowerCase().trim();
+      const items = submissions[cleanEmail] || Array(totalItemCount).fill(false);
       const visibleSlice = items.slice(0, totalItemCount);
       const count = visibleSlice.filter(Boolean).length;
       const pct = Math.round((count / totalItemCount) * 100);
-      const cols = visibleSlice.map((w) => (w ? 'SUBMITTED' : 'PENDING'));
+
+      const fStatuses = itemStatuses[cleanEmail] || [];
+      const fComments = itemComments[cleanEmail] || {};
+      let cleanCount = 0;
+      let commentedCount = 0;
+      let incompleteCount = 0;
+
+      const cols = visibleSlice.map((_, i) => {
+        const st = fStatuses[i] || (visibleSlice[i] ? 'checked' : 'unchecked');
+        if (st === 'checked') {
+          cleanCount++;
+          return 'CHECKED';
+        }
+        if (st === 'with-comments') {
+          commentedCount++;
+          const comm = fComments[String(i)] || fComments[i];
+          return comm ? `WITH COMMENTS ("${comm.replace(/"/g, '""')}")` : 'WITH COMMENTS';
+        }
+        if (st === 'incomplete') {
+          incompleteCount++;
+          const comm = fComments[String(i)] || fComments[i];
+          return comm ? `INCOMPLETE ("${comm.replace(/"/g, '""')}")` : 'INCOMPLETE';
+        }
+        return 'PENDING';
+      });
+
       return [
         `"${currentCategory.name}"`,
         `"${effectiveTermId}"`,
@@ -830,9 +1090,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         `"${f.name}"`,
         `"${f.email}"`,
         `"${f.department}"`,
-        ...cols,
+        ...cols.map((c) => `"${c}"`),
         count,
-        `${pct}%`,
+        cleanCount,
+        commentedCount,
+        incompleteCount,
+        `"${pct}%"`,
       ];
     });
 
@@ -861,11 +1124,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         `Period: ${isWeeklyCategory ? termsList.find((t) => t.id === selectedTermId)?.name + ` (Weeks 1 to ${currentTermWeeks})` : 'All Terms (Term 1, Term 2, Term 3)'}\n` +
         `Total Faculty Members: ${stats.totalFaculty}\n` +
         `Overall Compliance: ${stats.overallPercentage}%\n` +
+        `Total Checked (No Comments): ${stats.totalCleanChecked}\n` +
+        `Total With Comments: ${stats.totalWithComments}\n` +
+        `Total Incomplete (Lacking): ${stats.totalIncomplete}\n` +
         `100% Completed: ${stats.completedFacultyCount} / ${stats.totalFaculty} (${Math.round((stats.completedFacultyCount / (stats.totalFaculty || 1)) * 100)}%)\n` +
         `In Progress: ${stats.inProgressFacultyCount} / ${stats.totalFaculty}\n` +
         `Pending/Not Started: ${stats.noSubmissionFacultyCount} / ${stats.totalFaculty}\n` +
         `Total Deliverables Submitted: ${stats.totalCompleted} / ${stats.totalPossible}\n\n` +
-        `My Personal Status (${currentUser.name}): ${myStatus.itemsSubmitted} / ${totalItemCount} (${myStatus.percentage}%)\n`;
+        `My Personal Status (${currentUser.name}): ${myStatus.itemsSubmitted} / ${totalItemCount} (${myStatus.percentage}%)\n` +
+        `- Checked (Clean): ${myStatus.cleanCheckedCount}\n` +
+        `- With Comments: ${myStatus.withCommentsCount}\n` +
+        `- Incomplete (Lacking): ${myStatus.incompleteCount}\n`;
       navigator.clipboard.writeText(summaryText);
       showToast(`📋 ${currentCategory.name} Summary copied to clipboard!`);
       return;
@@ -876,15 +1145,27 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       `Period: ${isWeeklyCategory ? termsList.find((t) => t.id === selectedTermId)?.name + ` (Weeks 1 to ${currentTermWeeks})` : 'All Terms (Term 1, Term 2, Term 3)'}\n` +
       `Total Faculty: ${stats.totalFaculty}\n` +
       `Overall Compliance: ${stats.overallPercentage}%\n` +
+      `Total Checked (No Comments): ${stats.totalCleanChecked}\n` +
+      `Total With Comments: ${stats.totalWithComments}\n` +
+      `Total Incomplete (Lacking): ${stats.totalIncomplete}\n` +
       `100% Completed: ${stats.completedFacultyCount} / ${stats.totalFaculty}\n\n` +
       `Faculty Compliance List:\n` +
       allFaculty
         .map((f) => {
-          const items = submissions[f.email] || Array(totalItemCount).fill(false);
+          const cleanEmail = f.email.toLowerCase().trim();
+          const items = submissions[cleanEmail] || Array(totalItemCount).fill(false);
           const count = items.slice(0, totalItemCount).filter(Boolean).length;
-          return `- ${f.surname}, ${f.name} (${f.department}): ${count}/${totalItemCount} (${Math.round(
-            (count / totalItemCount) * 100
-          )}%)`;
+          const fStatuses = itemStatuses[cleanEmail] || [];
+          let clean = 0;
+          let withComm = 0;
+          let inc = 0;
+          for (let i = 0; i < totalItemCount; i++) {
+            const st = fStatuses[i] || (items[i] ? 'checked' : 'unchecked');
+            if (st === 'checked') clean++;
+            else if (st === 'with-comments') withComm++;
+            else if (st === 'incomplete') inc++;
+          }
+          return `- ${f.surname}, ${f.name} (${f.department}): ${count}/${totalItemCount} (${clean} Clean, ${withComm} With Comments, ${inc} Incomplete)`;
         })
         .join('\n');
 
@@ -1238,97 +1519,120 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         </div>
       </div>
 
-      {/* Top Metrics Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Metric 1: Overall Compliance */}
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
-            <span>{currentCategory.name} Compliance</span>
-            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl">
-              <BarChart3 className="w-4 h-4" />
+      {/* Top Metrics Cards (Administrator Only) */}
+      {isAdmin && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+          {/* Metric 1: Overall Compliance */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+              <span>{currentCategory.name} Compliance</span>
+              <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl">
+                <BarChart3 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
+                {stats.overallPercentage}%
+              </span>
+              <span className="text-xs text-slate-500 font-mono">
+                ({stats.totalCompleted}/{stats.totalPossible} {isWeeklyCategory ? 'wks' : 'terms'})
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-blue-600 h-full rounded-full transition-all duration-500"
+                style={{ width: `${stats.overallPercentage}%` }}
+              />
             </div>
           </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
-              {stats.overallPercentage}%
-            </span>
-            <span className="text-xs text-slate-500 font-mono">
-              ({stats.totalCompleted}/{stats.totalPossible} {isWeeklyCategory ? 'wks' : 'terms'})
-            </span>
-          </div>
-          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-            <div
-              className="bg-blue-600 h-full rounded-full transition-all duration-500"
-              style={{ width: `${stats.overallPercentage}%` }}
-            />
-          </div>
-        </div>
 
-        {/* Metric 2: Registered Faculty */}
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
-            <span>Registered Faculty</span>
-            <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-xl">
-              <Users className="w-4 h-4" />
+          {/* Metric 2: Registered Faculty */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+              <span>Registered Faculty</span>
+              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                <Users className="w-4 h-4" />
+              </div>
             </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
+                {stats.totalFaculty}
+              </span>
+              <span className="text-xs text-slate-500 font-mono">teachers</span>
+            </div>
+            <p className="text-[11px] text-slate-500 truncate">
+              JHS & SHS Teachers
+            </p>
           </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
-              {stats.totalFaculty}
-            </span>
-            <span className="text-xs text-slate-500 font-mono">teachers</span>
-          </div>
-          <p className="text-[11px] text-slate-500 truncate">
-            JHS & SHS Teachers
-          </p>
-        </div>
 
-        {/* Metric 3: Fully Submitted */}
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
-            <span>100% {currentCategory.name} Complete</span>
-            <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-xl">
-              <CheckCircle2 className="w-4 h-4" />
+          {/* Metric 3: Checked Clean */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+              <span>Checked (Clean)</span>
+              <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
             </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono">
+                {stats.totalCleanChecked}
+              </span>
+              <span className="text-xs text-slate-500 font-mono">
+                / {stats.totalCompleted} submitted
+              </span>
+            </div>
+            <p className="text-[11px] text-emerald-700 font-mono font-medium truncate">
+              {stats.completedFacultyCount} teacher(s) 100% compliant ({isWeeklyCategory ? `Weeks 1–${currentTermWeeks}` : 'Terms 1, 2 & 3'})
+            </p>
           </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono">
-              {stats.completedFacultyCount}
-            </span>
-            <span className="text-xs text-slate-500 font-mono">
-              / {stats.totalFaculty} teachers
-            </span>
-          </div>
-          <p className="text-[11px] text-emerald-700 font-mono font-medium truncate">
-            {stats.totalFaculty > 0 ? Math.round((stats.completedFacultyCount / stats.totalFaculty) * 100) : 0}% perfect compliance ({isWeeklyCategory ? `Weeks 1–${currentTermWeeks}` : 'Terms 1, 2 & 3'})
-          </p>
-        </div>
 
-        {/* Metric 4: In-Progress / Pending */}
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-          <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
-            <span>In Progress / Pending</span>
-            <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl">
-              <Clock className="w-4 h-4" />
+          {/* Metric 4: With Comments (Corrections) */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+              <span>With Comments</span>
+              <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl">
+                <MessageSquare className="w-4 h-4" />
+              </div>
             </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-2xl sm:text-3xl font-extrabold text-amber-600 font-mono">
+                {stats.totalWithComments}
+              </span>
+              <span className="text-xs text-slate-500 font-mono">
+                deliverables
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-700 truncate font-mono font-medium">
+              {stats.facultyWithCommentsCount} faculty member(s) have corrections
+            </p>
           </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-amber-600 font-mono">
-              {stats.inProgressFacultyCount + stats.noSubmissionFacultyCount}
-            </span>
-            <span className="text-xs text-slate-500 font-mono">
-              ({stats.noSubmissionFacultyCount} not started)
-            </span>
+
+          {/* Metric 5: Incomplete (Lacking Requirements) */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2 col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+              <span>Incomplete (Lacking)</span>
+              <div className="p-1.5 bg-rose-50 text-rose-600 rounded-xl">
+                <AlertCircle className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-2xl sm:text-3xl font-extrabold text-rose-600 font-mono">
+                {stats.totalIncomplete}
+              </span>
+              <span className="text-xs text-slate-500 font-mono">
+                lacking
+              </span>
+            </div>
+            <p className="text-[11px] text-rose-700 truncate font-mono font-medium">
+              {stats.facultyWithIncompleteCount} faculty member(s) have lacking items
+            </p>
           </div>
-          <p className="text-[11px] text-slate-500 truncate font-mono">
-            {isWeeklyCategory ? `${currentTerm.name} • Weeks 1–${currentTermWeeks}` : 'All 3 Academic Terms'}
-          </p>
         </div>
-      </div>
+      )}
 
       {/* NON-ADMIN FACULTY HIGHLIGHT CARD (When Directory Table is Hidden) */}
       {!isAdmin && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-3xl p-5 sm:p-6 shadow-xs">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center space-x-2">
@@ -1342,8 +1646,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
               <p className="text-xs text-slate-600 font-mono">
                 {isWeeklyCategory
-                  ? `${currentTerm.name} instructional progress. Directory recording is restricted to department administrators.`
-                  : `Academic terms progress for ${currentCategory.name} (Term 1, Term 2, Term 3). Directory recording is restricted to administrators.`}
+                  ? `${currentTerm.name} instructional progress. Green indicates verified with no comments; Amber indicates corrections requested; Red indicates lacking requirements.`
+                  : `Academic terms progress for ${currentCategory.name} (Term 1, Term 2, Term 3). Check below for review status and feedback.`}
               </p>
             </div>
 
@@ -1362,27 +1666,199 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           </div>
 
+          {/* Breakdown summary pills */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-100/80 text-emerald-800 rounded-xl text-xs font-mono font-bold border border-emerald-300">
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+              <span>{myStatus.cleanCheckedCount} Checked (No Comments)</span>
+            </div>
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-100/80 text-amber-900 rounded-xl text-xs font-mono font-bold border border-amber-300">
+              <MessageSquare className="w-3.5 h-3.5 fill-current" />
+              <span>{myStatus.withCommentsCount} With Comments</span>
+            </div>
+            {myStatus.incompleteCount > 0 && (
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-rose-100/80 text-rose-900 rounded-xl text-xs font-mono font-bold border border-rose-300">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                <span>{myStatus.incompleteCount} Incomplete (Lacking)</span>
+              </div>
+            )}
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-white text-slate-600 rounded-xl text-xs font-mono font-bold border border-slate-200">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span>{myStatus.pendingCount} Pending</span>
+            </div>
+          </div>
+
           {/* Item Checkmarks Visualizer for this Faculty Member */}
-          <div className="mt-4 pt-3 border-t border-blue-100 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-mono font-bold text-slate-600 mr-2">Submitted {isWeeklyCategory ? 'Weeks' : 'Terms'}:</span>
+          <div className="pt-3 border-t border-blue-100 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-mono font-bold text-slate-600 mr-2">Deliverable Statuses:</span>
             {columnItems.map((col, idx) => {
-              const isChecked = Boolean(myStatus.items[idx]);
+              const status = myStatus.itemsStatuses[idx] || (myStatus.items[idx] ? 'checked' : 'unchecked');
+              const comment = myStatus.itemsComments[idx] || '';
+              const isChecked = status === 'checked';
+              const isWithComments = status === 'with-comments';
+              const isIncomplete = status === 'incomplete';
+
+              if (isIncomplete) {
+                return (
+                  <button
+                    key={col.key}
+                    type="button"
+                    onClick={() =>
+                      setFacultyDetailModal({
+                        colLabel: col.fullLabel,
+                        status: 'incomplete',
+                        comment: comment || 'This submission was marked incomplete (lacking requirements) by the administrator.',
+                      })
+                    }
+                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-rose-500 text-white border-rose-600 shadow-2xs hover:bg-rose-600 transition-all cursor-pointer"
+                    title={`${col.fullLabel}: Incomplete (Lacking Requirements) • Click to view what is lacking`}
+                  >
+                    <span>{col.headerLabel}</span>
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span className="text-[10px] bg-rose-700/60 px-1.5 py-0.5 rounded-md font-medium">Incomplete</span>
+                  </button>
+                );
+              }
+
+              if (isWithComments) {
+                return (
+                  <button
+                    key={col.key}
+                    type="button"
+                    onClick={() =>
+                      setFacultyDetailModal({
+                        colLabel: col.fullLabel,
+                        status: 'with-comments',
+                        comment: comment || 'This submission was checked and marked with corrections by the administrator.',
+                      })
+                    }
+                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-amber-500 text-white border-amber-600 shadow-2xs hover:bg-amber-600 transition-all cursor-pointer"
+                    title={`${col.fullLabel}: Checked with Comments • Click to view administrator feedback`}
+                  >
+                    <span>{col.headerLabel}</span>
+                    <MessageSquare className="w-3.5 h-3.5 fill-current" />
+                    <span className="text-[10px] bg-amber-700/60 px-1.5 py-0.5 rounded-md font-medium">With Comments</span>
+                  </button>
+                );
+              }
+
+              if (isChecked) {
+                return (
+                  <div
+                    key={col.key}
+                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-emerald-500 text-white border-emerald-600 shadow-2xs"
+                    title={`${col.fullLabel}: Checked (Clean / No Comments)`}
+                  >
+                    <span>{col.headerLabel}</span>
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    <span className="text-[10px] bg-emerald-700/60 px-1.5 py-0.5 rounded-md font-medium">Checked</span>
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={col.key}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border ${
-                    isChecked
-                      ? 'bg-emerald-500 text-white border-emerald-600 shadow-2xs'
-                      : 'bg-white text-slate-400 border-slate-200'
-                  }`}
-                  title={`${col.fullLabel}: ${isChecked ? 'Submitted' : 'Pending'}`}
+                  className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-white text-slate-400 border-slate-200"
+                  title={`${col.fullLabel}: Pending`}
                 >
                   <span>{col.headerLabel}</span>
-                  {isChecked ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : <Clock className="w-3 h-3 text-slate-300" />}
+                  <Clock className="w-3 h-3 text-slate-300" />
+                  <span className="text-[10px] text-slate-400 font-medium">Pending</span>
                 </div>
               );
             })}
           </div>
+
+          {/* Prominent Admin Incomplete / Lacking Feedback Panel */}
+          {myStatus.incompleteCount > 0 && (
+            <div className="mt-3 pt-3 border-t border-rose-200/80 bg-rose-500/10 rounded-2xl p-4 border border-rose-300/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 text-rose-950 font-bold text-xs font-mono">
+                  <AlertCircle className="w-4 h-4 text-rose-600" />
+                  <span>Lacking Submission Requirements ({myStatus.incompleteCount} item{myStatus.incompleteCount > 1 ? 's' : ''} marked Incomplete):</span>
+                </div>
+                <span className="text-[11px] font-mono text-rose-900 bg-rose-200/80 px-2.5 py-0.5 rounded-full font-bold">
+                  Missing Requirements
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {columnItems.map((col, idx) => {
+                  if (myStatus.itemsStatuses[idx] !== 'incomplete') return null;
+                  const commentText = myStatus.itemsComments[idx];
+                  return (
+                    <div key={col.key} className="bg-white/95 border border-rose-200 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-rose-950 flex items-center space-x-1.5">
+                          <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
+                          <span>{col.fullLabel}</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                          Incomplete / Lacking
+                        </span>
+                      </div>
+                      <p className="text-slate-700 pl-3 border-l-2 border-rose-400 text-xs italic">
+                        "{commentText || 'The submitted deliverable is lacking required parts, competencies, attachments, or signatures.'}"
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-rose-900 font-mono pt-1">
+                ⚠️ <strong>Action Needed:</strong> Please provide the missing components and upload your complete file to your personal Faculty Folder.
+              </p>
+            </div>
+          )}
+
+          {/* Prominent Admin Comments Feedback Panel */}
+          {myStatus.withCommentsCount > 0 && (
+            <div className="mt-3 pt-3 border-t border-amber-200/80 bg-amber-500/10 rounded-2xl p-4 border border-amber-300/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 text-amber-950 font-bold text-xs font-mono">
+                  <MessageSquare className="w-4 h-4 text-amber-600" />
+                  <span>Administrator Comments & Corrections ({myStatus.withCommentsCount} item{myStatus.withCommentsCount > 1 ? 's' : ''}):</span>
+                </div>
+                <span className="text-[11px] font-mono text-amber-900 bg-amber-200/80 px-2.5 py-0.5 rounded-full font-bold">
+                  Action Required
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {columnItems.map((col, idx) => {
+                  if (myStatus.itemsStatuses[idx] !== 'with-comments') return null;
+                  const commentText = myStatus.itemsComments[idx];
+                  return (
+                    <div key={col.key} className="bg-white/95 border border-amber-200 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-950 flex items-center space-x-1.5">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                          <span>{col.fullLabel}</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                          With Comments
+                        </span>
+                      </div>
+                      <p className="text-slate-700 pl-3 border-l-2 border-amber-400 text-xs italic">
+                        "{commentText || 'Please review this submission and coordinate with the administrator for corrections.'}"
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-amber-900 font-mono pt-1">
+                💡 <strong>Next Step:</strong> Please apply the necessary corrections and re-upload your revised file to your personal faculty folder.
+              </p>
+            </div>
+          )}
+
+          {/* Clean Compliance Banner */}
+          {myStatus.itemsSubmitted > 0 && myStatus.withCommentsCount === 0 && myStatus.incompleteCount === 0 && (
+            <div className="mt-3 pt-3 border-t border-emerald-100 bg-emerald-50/70 rounded-2xl p-3 border border-emerald-200 flex items-center space-x-2 text-xs font-mono text-emerald-900">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                All <strong>{myStatus.itemsSubmitted}</strong> of your submitted {currentCategory.name} records are <strong>Checked with no comments</strong> (clean compliance). Great job!
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1470,7 +1946,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
             {/* Search, Filter & Status Badges */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 pt-1">
-              <div className="sm:col-span-6 relative">
+              <div className="sm:col-span-5 relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -1507,7 +1983,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
 
               {/* Status Filter */}
-              <div className="sm:col-span-3 flex items-center space-x-1 text-xs font-mono">
+              <div className="sm:col-span-4 flex items-center space-x-1 text-xs font-mono">
                 <button
                   type="button"
                   onClick={() => setStatusFilter('all')}
@@ -1532,10 +2008,32 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => setStatusFilter('with-comments')}
+                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                    statusFilter === 'with-comments'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Comments ({stats.facultyWithCommentsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('incomplete')}
+                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                    statusFilter === 'incomplete'
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Incomplete ({stats.facultyWithIncompleteCount})
+                </button>
+                <button
+                  type="button"
                   onClick={() => setStatusFilter('in-progress')}
                   className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'in-progress'
-                      ? 'bg-amber-600 text-white'
+                      ? 'bg-slate-700 text-white'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                   }`}
                 >
@@ -1647,27 +2145,46 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
                         {/* Checkboxes (Weeks or Term 1, Term 2, Term 3) */}
                         {columnItems.map((col) => {
-                          const isChecked = Boolean(items[col.index]);
+                          const itemStatus = getItemStatus(faculty.email, col.index);
+                          const itemComment = getItemComment(faculty.email, col.index);
                           const isCurrentlySaving = autoSavingItemKey === `${faculty.email.toLowerCase().trim()}_${col.index}`;
+                          const isChecked = itemStatus === 'checked';
+                          const isWithComments = itemStatus === 'with-comments';
+                          const isIncomplete = itemStatus === 'incomplete';
+
                           return (
                             <td
                               key={col.key}
-                              className="py-2.5 px-2 text-center border-l border-slate-200/60"
+                              className="py-2 px-1 text-center border-l border-slate-200/60"
                             >
                               <button
                                 type="button"
-                                onClick={() => handleToggleItem(faculty.email, col.index)}
-                                aria-label={`Toggle ${col.fullLabel} for ${faculty.name}`}
-                                className={`rounded-lg border flex items-center justify-center mx-auto transition-all cursor-pointer active:scale-90 ${
-                                  isWeeklyCategory ? 'w-7 h-7' : 'w-9 h-7 px-2'
+                                onClick={() => handleOpenCellAction(faculty, col)}
+                                aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
+                                className={`rounded-lg border flex items-center justify-center mx-auto transition-all cursor-pointer active:scale-90 relative ${
+                                  isWeeklyCategory ? 'w-7 h-7' : 'w-9 h-7 px-1'
                                 } ${
                                   isChecked
-                                    ? 'bg-emerald-500 border-emerald-600 text-white shadow-2xs'
+                                    ? 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600'
+                                    : isWithComments
+                                    ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
+                                    : isIncomplete
+                                    ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
                                     : 'bg-white border-slate-300 text-transparent hover:border-slate-400 hover:bg-slate-50'
                                 } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
-                                title={`${faculty.name} - ${col.fullLabel}: ${isChecked ? 'Submitted' : 'Pending'} • Auto-saves to Firebase`}
+                                title={`${faculty.name} - ${col.fullLabel}: ${
+                                  isChecked
+                                    ? 'Checked (No Comments / Approved)'
+                                    : isWithComments
+                                    ? `With Comments: "${itemComment || 'Feedback recorded'}"`
+                                    : isIncomplete
+                                    ? `Incomplete (Lacking): "${itemComment || 'Lacking requirements'}"`
+                                    : 'Pending / Not Checked'
+                                } • Click to select Checked, With Comments, Incomplete, or Pending`}
                               >
                                 {isChecked && <Check className="w-4 h-4 stroke-[3]" />}
+                                {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
+                                {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
                               </button>
                             </td>
                           );
@@ -1705,7 +2222,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                 ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
                                 : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
                             }`}
-                            title={isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete`}
+                            title={isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
                           >
                             {isAllChecked ? 'Reset' : 'Check All'}
                           </button>
@@ -1720,12 +2237,26 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Directory Footer Info */}
           <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-slate-500 gap-2">
-            <div className="flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-              <span>Green Check = Submitted {currentCategory.name}</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center space-x-1.5">
+                <span className="w-3.5 h-3.5 rounded-md bg-emerald-500 inline-flex items-center justify-center text-white text-[9px] font-bold">✓</span>
+                <span className="text-slate-800 font-bold">Checked</span> (No comments)
+              </div>
               <span className="text-slate-300">•</span>
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" />
-              <span>Empty Box = Pending</span>
+              <div className="flex items-center space-x-1.5">
+                <span className="w-3.5 h-3.5 rounded-md bg-amber-500 inline-flex items-center justify-center text-white text-[9px]">💬</span>
+                <span className="text-amber-800 font-bold">With Comments</span> (Corrections)
+              </div>
+              <span className="text-slate-300">•</span>
+              <div className="flex items-center space-x-1.5">
+                <span className="w-3.5 h-3.5 rounded-md bg-rose-500 inline-flex items-center justify-center text-white text-[9px] font-bold">!</span>
+                <span className="text-rose-800 font-bold">Incomplete</span> (Lacking requirements)
+              </div>
+              <span className="text-slate-300">•</span>
+              <div className="flex items-center space-x-1.5">
+                <span className="w-3.5 h-3.5 rounded-md bg-white border border-slate-300 inline-block" />
+                <span>Empty</span> (Pending)
+              </div>
             </div>
             <div>
               Showing <span className="font-bold text-slate-700">{filteredFaculty.length}</span> faculty members for{' '}
@@ -1737,42 +2268,32 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         </div>
       ) : null}
 
-      {/* SECTION 2: FACULTY SUBMISSION PROGRESS VISUALIZER */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-          <div className="flex items-center space-x-3">
-            <div className={`p-2.5 rounded-2xl ${!isAdmin ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-700'}`}>
-              {!isAdmin ? <PieChartIcon className="w-5 h-5" /> : <BarChart3 className="w-5 h-5" />}
-            </div>
-            <div>
-              <div className="flex items-center space-x-2 flex-wrap">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans">
-                  {!isAdmin
-                    ? `Faculty Visualizer Mode — ${currentCategory.fullName} (${currentCategory.name}) Data`
-                    : `${currentCategory.fullName} (${currentCategory.name}) Progress Visualizer`}
-                </h3>
-                <span className="bg-blue-100 text-blue-800 text-xs font-mono px-2 py-0.5 rounded-full font-bold">
-                  {isWeeklyCategory ? currentTerm.name : 'Terms 1, 2 & 3'}
-                </span>
-                {!isAdmin && (
-                  <span className="bg-purple-100 text-purple-800 text-xs font-mono px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
-                    <Lock className="w-3 h-3 inline mr-1 text-purple-600" />
-                    Privacy Protected
-                  </span>
-                )}
+      {/* SECTION 2: FACULTY SUBMISSION PROGRESS VISUALIZER (ADMINISTRATOR ONLY) */}
+      {isAdmin ? (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 rounded-2xl bg-blue-100 text-blue-700">
+                <BarChart3 className="w-5 h-5" />
               </div>
-              <p className="text-xs text-slate-500 font-mono">
-                {!isAdmin
-                  ? `Department submission analytics visualizer for ${currentCategory.name}. Displays aggregate progress through pie charts with faculty privacy protection.`
-                  : isWeeklyCategory
-                  ? `Analytical charts representing submitted weeks out of ${currentTermWeeks} for all faculty members.`
-                  : `Visualizer showing Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} compliance.`}
-              </p>
+              <div>
+                <div className="flex items-center space-x-2 flex-wrap">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans">
+                    {currentCategory.fullName} ({currentCategory.name}) Progress Visualizer
+                  </h3>
+                  <span className="bg-blue-100 text-blue-800 text-xs font-mono px-2 py-0.5 rounded-full font-bold">
+                    {isWeeklyCategory ? currentTerm.name : 'Terms 1, 2 & 3'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-mono">
+                  {isWeeklyCategory
+                    ? `Analytical charts representing submitted weeks out of ${currentTermWeeks} for all faculty members.`
+                    : `Visualizer showing Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} compliance.`}
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* Toggle View: Admin vs Faculty Visualizer Mode */}
-          {isAdmin ? (
+            {/* Toggle View: Admin Visualizer Modes */}
             <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs font-mono font-bold">
               <button
                 type="button"
@@ -1809,76 +2330,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <span>Pie Chart</span>
               </button>
             </div>
-          ) : (
-            <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs font-mono font-bold">
-              <button
-                type="button"
-                onClick={() => setFacultyPieTab('both')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  facultyPieTab === 'both'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All Pie Charts
-              </button>
-              <button
-                type="button"
-                onClick={() => setFacultyPieTab('compliance')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  facultyPieTab === 'compliance'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Compliance Status
-              </button>
-              <button
-                type="button"
-                onClick={() => setFacultyPieTab('volume')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  facultyPieTab === 'volume'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Deliverables Ratio
-              </button>
-              <button
-                type="button"
-                onClick={() => setFacultyPieTab('periods')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  facultyPieTab === 'periods'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {isWeeklyCategory ? 'Weekly Distribution' : 'Term Distribution'}
-              </button>
-            </div>
-          )}
-        </div>
+          </div>
 
-        {/* NON-ADMIN: FACULTY VISUALIZER PIE CHART VIEW */}
-        {!isAdmin || viewMode === 'pie-chart' ? (
-          <div className="space-y-6">
-            {/* Privacy notice banner for Faculty Visualizer Mode */}
-            {!isAdmin && (
-              <div className="p-3.5 bg-purple-50/70 border border-purple-200/80 rounded-2xl flex items-center justify-between gap-3 text-xs font-mono text-purple-900">
-                <div className="flex items-center space-x-2.5">
-                  <ShieldCheck className="w-4 h-4 text-purple-600 shrink-0" />
-                  <span>
-                    <strong>Faculty Visualizer Mode:</strong> Displaying anonymized submission data through pie charts. Individual colleague names are confidential.
-                  </span>
-                </div>
-                <span className="hidden sm:inline-block bg-purple-200/70 text-purple-800 text-[10px] font-bold px-2.5 py-0.5 rounded-md">
-                  {allFaculty.length} Registered Teachers
-                </span>
-              </div>
-            )}
-
-            {/* Render Selected Pie Charts */}
-            {(facultyPieTab === 'both' || facultyPieTab === 'compliance' || viewMode === 'pie-chart') && (
+          {/* ADMIN VISUALIZER PIE CHART VIEW */}
+          {viewMode === 'pie-chart' ? (
+            <div className="space-y-6">
+              {/* Render Selected Pie Charts */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Chart 1: Faculty Compliance Status Pie Chart */}
                 <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
@@ -2048,11 +2505,9 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   </div>
                 </div>
               </div>
-            )}
 
             {/* Chart 3: Period / Weekly Submissions Pie Breakdown */}
-            {(facultyPieTab === 'periods' || (facultyPieTab === 'both' && !isAdmin)) && (
-              <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
+            <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
@@ -2117,7 +2572,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   </ResponsiveContainer>
                 </div>
               </div>
-            )}
 
             {/* Department Aggregate Summary Stats Footer */}
             <div className="p-4 bg-slate-900 text-white rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono shadow-md">
@@ -2283,6 +2737,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           </div>
         )}
       </div>
+    ) : null}
 
       {/* ADMIN: SET NUMBER OF WEEKS PER TERM MODAL (1 to 12 Weeks Max) */}
       {isSettingWeeksModalOpen && (
@@ -2614,6 +3069,371 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN STATUS REVIEW MODAL (Checked vs With Comments vs Incomplete) */}
+      {isAdmin && activeCellAction && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-5 sm:p-6 bg-slate-50 border-b border-slate-200 flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className={`w-10 h-10 rounded-2xl ${currentCategory.activeBg} text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0`}>
+                  {currentCategory.icon}
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                      {activeCellAction.colLabel}
+                    </span>
+                    <span className="text-xs font-mono text-slate-500 font-bold">
+                      {currentCategory.name} Review
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 font-sans mt-0.5">
+                    {activeCellAction.facultySurname}, {activeCellAction.facultyName}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-mono">
+                    {activeCellAction.facultyEmail} • {activeCellAction.department || 'SHS Dept.'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveCellAction(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-all cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Select Submission Review Status:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* Option 1: Checked (No Comments) */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedActionType('checked')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      selectedActionType === 'checked'
+                        ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-emerald-800 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
+                        <span>Checked</span>
+                      </span>
+                      {selectedActionType === 'checked' && (
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                      No comments or corrections. Clean compliance.
+                    </p>
+                  </button>
+
+                  {/* Option 2: With Comments */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedActionType('with-comments')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      selectedActionType === 'with-comments'
+                        ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-amber-900 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-amber-500 text-white flex items-center justify-center text-[10px]">💬</span>
+                        <span>With Comments</span>
+                      </span>
+                      {selectedActionType === 'with-comments' && (
+                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                      Deliverable has corrections or notes for teacher.
+                    </p>
+                  </button>
+
+                  {/* Option 3: Incomplete */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedActionType('incomplete')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      selectedActionType === 'incomplete'
+                        ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-rose-900 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">!</span>
+                        <span>Incomplete</span>
+                      </span>
+                      {selectedActionType === 'incomplete' && (
+                        <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                      Submission has lacking components or missing attachments.
+                    </p>
+                  </button>
+                </div>
+
+                {/* Option 4: Reset / Pending */}
+                <div className="mt-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedActionType('unchecked')}
+                    className={`text-xs font-mono font-medium underline-offset-2 transition-all cursor-pointer ${
+                      selectedActionType === 'unchecked'
+                        ? 'text-slate-700 font-bold underline'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {selectedActionType === 'unchecked' ? '● Set as Pending / Unchecked' : 'Set as Pending / Unchecked'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Comments / Notes Input (Shows when With Comments or Incomplete is selected) */}
+              {(selectedActionType === 'with-comments' || selectedActionType === 'incomplete') && (
+                <div className="space-y-2 pt-1 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <label className={`block text-xs font-mono font-bold ${
+                      selectedActionType === 'incomplete' ? 'text-rose-900' : 'text-amber-900'
+                    }`}>
+                      {selectedActionType === 'incomplete'
+                        ? 'Notes on Lacking Components / Missing Parts:'
+                        : 'Corrections / Feedback for Teacher:'}
+                    </label>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Visible in faculty submission report
+                    </span>
+                  </div>
+                  <textarea
+                    value={commentInput}
+                    onChange={(e) => setCommentInput(e.target.value)}
+                    placeholder={
+                      selectedActionType === 'incomplete'
+                        ? 'e.g. Missing Week 3 attachment; lacking required competencies; missing rubrics/TOS item distribution...'
+                        : 'e.g. Please revise learning competencies; missing supervisor signature; incomplete items...'
+                    }
+                    rows={3}
+                    className={`w-full p-3 bg-white border rounded-2xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 resize-none shadow-2xs ${
+                      selectedActionType === 'incomplete'
+                        ? 'border-rose-300 focus:ring-rose-500'
+                        : 'border-amber-300 focus:ring-amber-500'
+                    }`}
+                  />
+
+                  {/* Quick comment suggestion chips */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                      Quick Suggestions:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(selectedActionType === 'incomplete'
+                        ? [
+                            'Missing file attachment or link in faculty folder.',
+                            'Lacking learning competencies or objectives.',
+                            'Missing Table of Specifications (TOS) breakdown.',
+                            'Incomplete test questions / answer key missing.',
+                            'Missing Department Head / Supervisor signature.',
+                            'Please upload the lacking materials to your folder.',
+                          ]
+                        : [
+                            'Please attach complete learning objectives & competencies.',
+                            'Missing signature or date.',
+                            'Ensure TOS alignment matches DepEd guidelines.',
+                            'Formatting / rubric adjustments needed.',
+                            'Please upload revised file to your faculty folder.',
+                          ]
+                      ).map((tip) => (
+                        <button
+                          key={tip}
+                          type="button"
+                          onClick={() => setCommentInput(tip)}
+                          className={`text-[10px] font-mono px-2 py-1 rounded-lg transition-all cursor-pointer border ${
+                            selectedActionType === 'incomplete'
+                              ? 'bg-slate-100 hover:bg-rose-100 hover:text-rose-900 text-slate-600 border-slate-200'
+                              : 'bg-slate-100 hover:bg-amber-100 hover:text-amber-900 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          + {tip}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Status summary preview */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs font-mono text-slate-600 flex items-center justify-between">
+                <span>Resulting Status:</span>
+                <span className={`font-bold px-2 py-0.5 rounded-md ${
+                  selectedActionType === 'checked'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : selectedActionType === 'with-comments'
+                    ? 'bg-amber-100 text-amber-900'
+                    : selectedActionType === 'incomplete'
+                    ? 'bg-rose-100 text-rose-900'
+                    : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {selectedActionType === 'checked'
+                    ? '✓ Checked (No Comments)'
+                    : selectedActionType === 'with-comments'
+                    ? '💬 With Comments'
+                    : selectedActionType === 'incomplete'
+                    ? '⚠️ Incomplete (Lacking)'
+                    : '⚪ Pending (Unchecked)'}
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveCellAction(null)}
+                className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer shadow-2xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await handleSaveCellStatus(
+                    activeCellAction.facultyEmail,
+                    activeCellAction.itemIndex,
+                    selectedActionType,
+                    commentInput
+                  );
+                  setActiveCellAction(null);
+                }}
+                className={`px-5 py-2 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-1.5 cursor-pointer active:scale-95 ${
+                  selectedActionType === 'checked'
+                    ? 'bg-emerald-600 hover:bg-emerald-500'
+                    : selectedActionType === 'with-comments'
+                    ? 'bg-amber-600 hover:bg-amber-500'
+                    : selectedActionType === 'incomplete'
+                    ? 'bg-rose-600 hover:bg-rose-500'
+                    : 'bg-slate-700 hover:bg-slate-600'
+                }`}
+              >
+                <Save className="w-4 h-4" />
+                <span>Save Status & Sync</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FACULTY VIEW FEEDBACK DETAIL MODAL (With Comments or Incomplete) */}
+      {facultyDetailModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className={`p-5 border-b flex items-center justify-between ${
+              facultyDetailModal.status === 'incomplete'
+                ? 'bg-rose-50 border-rose-200'
+                : 'bg-amber-50 border-amber-200'
+            }`}>
+              <div className="flex items-center space-x-2.5">
+                <div className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shadow-xs ${
+                  facultyDetailModal.status === 'incomplete'
+                    ? 'bg-rose-500'
+                    : 'bg-amber-500'
+                }`}>
+                  {facultyDetailModal.status === 'incomplete' ? (
+                    <AlertCircle className="w-5 h-5" />
+                  ) : (
+                    <MessageSquare className="w-5 h-5 fill-current" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 font-sans">
+                    {facultyDetailModal.status === 'incomplete'
+                      ? 'Incomplete Deliverable Details'
+                      : 'Administrator Feedback & Corrections'}
+                  </h3>
+                  <p className={`text-xs font-mono font-bold ${
+                    facultyDetailModal.status === 'incomplete' ? 'text-rose-800' : 'text-amber-800'
+                  }`}>
+                    {facultyDetailModal.colLabel}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFacultyDetailModal(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-all cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-3 font-mono">
+              <div className="flex items-center space-x-2">
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-md border ${
+                  facultyDetailModal.status === 'incomplete'
+                    ? 'text-rose-900 bg-rose-100 border-rose-300'
+                    : 'text-amber-900 bg-amber-100 border-amber-300'
+                }`}>
+                  Status: {facultyDetailModal.status === 'incomplete' ? 'Incomplete (Lacking Requirements)' : 'With Comments (Corrections)'}
+                </span>
+                <span className="text-xs text-slate-500">
+                  {facultyDetailModal.status === 'incomplete' ? 'Action needed to complete deliverable' : 'Action required by teacher'}
+                </span>
+              </div>
+
+              <div className={`p-4 rounded-r-xl border-l-4 ${
+                facultyDetailModal.status === 'incomplete'
+                  ? 'bg-rose-50/70 border-rose-500'
+                  : 'bg-amber-50/70 border-amber-500'
+              }`}>
+                <p className="text-xs text-slate-800 leading-relaxed italic">
+                  "{facultyDetailModal.comment}"
+                </p>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 space-y-1">
+                <p className="font-bold flex items-center space-x-1.5">
+                  <span>💡</span>
+                  <span>How to resolve:</span>
+                </p>
+                <p className="text-[11px] text-blue-800">
+                  {facultyDetailModal.status === 'incomplete'
+                    ? 'Please provide the missing parts, attachments, or competencies and upload the complete file into your personal Faculty Folder. Once updated, the administrator will verify and mark it clean.'
+                    : 'Please make the necessary revisions to your deliverable and upload the updated document into your personal Faculty Folder. Once submitted, the administrator will review and mark it clean.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 text-right">
+              <button
+                type="button"
+                onClick={() => setFacultyDetailModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-mono font-bold transition-all cursor-pointer"
+              >
+                Close Feedback
+              </button>
             </div>
           </div>
         </div>

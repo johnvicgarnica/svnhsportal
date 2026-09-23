@@ -173,6 +173,13 @@
           "type": "array",
           "items": { "type": "boolean" }
         },
+        "statuses": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "comments": {
+          "type": "object"
+        },
         "lastSavedWeek": { "type": "number" },
         "updatedAt": { "type": "string" }
       },
@@ -193,6 +200,13 @@
           "type": "array",
           "items": { "type": "boolean" }
         },
+        "statuses": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "comments": {
+          "type": "object"
+        },
         "lastSavedWeek": { "type": "number" },
         "updatedAt": { "type": "string" }
       },
@@ -212,6 +226,13 @@
         "weeks": {
           "type": "array",
           "items": { "type": "boolean" }
+        },
+        "statuses": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "comments": {
+          "type": "object"
         },
         "lastSavedWeek": { "type": "number" },
         "updatedAt": { "type": "string" }
