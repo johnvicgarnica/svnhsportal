@@ -123,7 +123,8 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
   const isMasterAdmin = currentUser.role === 'Admin' && (
     userEmailClean === masterEmailClean ||
     userEmailClean === 'johnvic.garnica@deped.gov.ph' ||
-    userEmailClean === 'garjohn@deped.gov.ph'
+    userEmailClean === 'garjohn@deped.gov.ph' ||
+    userEmailClean === 'johnvicgarnica1@gmail.com'
   );
 
   // Custom Faculty Account Passwords Map
@@ -807,27 +808,29 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                 <span>School Bulletins ({announcements.length})</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setAdminSubTab('passwords')}
-                className={`flex-1 sm:flex-none px-4 py-2 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                  adminSubTab === 'passwords'
-                    ? 'bg-amber-600 text-white shadow-2xs'
-                    : 'text-amber-800 hover:text-amber-950 hover:bg-amber-100/60'
-                }`}
-              >
-                <Key className="w-3.5 h-3.5 text-amber-500" />
-                <span>Faculty & Admin Accounts Management</span>
-                {facultyRequests.length + adminRequests.length > 0 ? (
-                  <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce">
-                    {facultyRequests.length + adminRequests.length} Pending
-                  </span>
-                ) : (
-                  <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase">
-                    Real-Time
-                  </span>
-                )}
-              </button>
+              {isMasterAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setAdminSubTab('passwords')}
+                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                    adminSubTab === 'passwords'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'text-amber-800 hover:text-amber-950 hover:bg-amber-100/60'
+                  }`}
+                >
+                  <Key className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Faculty & Admin Accounts Management</span>
+                  {facultyRequests.length + adminRequests.length > 0 ? (
+                    <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce">
+                      {facultyRequests.length + adminRequests.length} Pending
+                    </span>
+                  ) : (
+                    <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase">
+                      Master Admin
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
 
             <div className="text-[11px] font-mono text-slate-500 flex items-center space-x-1.5 px-2">
@@ -1001,8 +1004,8 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
             </div>
           )}
 
-          {/* SUB-TAB 2: FACULTY REAL-TIME PASSWORD SECURITY CONTROL */}
-          {adminSubTab === 'passwords' && (
+          {/* SUB-TAB 2: FACULTY REAL-TIME PASSWORD SECURITY CONTROL (MASTER ADMIN ONLY) */}
+          {adminSubTab === 'passwords' && isMasterAdmin && (
             <div className="space-y-6">
 
               {/* CARD: Pending Faculty Account Registration Requests */}

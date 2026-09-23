@@ -102,7 +102,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const isAdmin = currentUser.role === 'Admin';
 
   // Admin Sub-Section Tab ('passwords', 'faculty-folders', or 'announcements')
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements'>('passwords');
+  // Default to 'announcements' so passwords page is not exposed by default
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
 
   // Master Faculty Password State
@@ -116,7 +117,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // Master Admin Email & Password State
   const [masterAdminEmail, setMasterAdminEmail] = useState<string>('johnvic.garnica@deped.gov.ph');
   const [inputMasterAdminEmail, setInputMasterAdminEmail] = useState<string>('johnvic.garnica@deped.gov.ph');
-  const [masterAdminPassword, setMasterAdminPassword] = useState<string>('');
+  const [masterAdminPassword, setMasterAdminPassword] = useState<string>('garjohn@1995');
   const [showMasterAdminPassword, setShowMasterAdminPassword] = useState<boolean>(false);
   const [newMasterAdminInput, setNewMasterAdminInput] = useState<string>('');
   const [confirmMasterAdminInput, setConfirmMasterAdminInput] = useState<string>('');
@@ -129,8 +130,40 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const isMasterAdmin = currentUser.role === 'Admin' && (
     userEmailClean === masterEmailClean ||
     userEmailClean === 'johnvic.garnica@deped.gov.ph' ||
-    userEmailClean === 'garjohn@deped.gov.ph'
+    userEmailClean === 'garjohn@deped.gov.ph' ||
+    userEmailClean === 'johnvicgarnica1@gmail.com'
   );
+
+  // Master Admin Password Verification & Unlock State (Restricting Accounts & Passwords to Master Admin)
+  const [isMasterAdminUnlocked, setIsMasterAdminUnlocked] = useState<boolean>(false);
+  const canAccessMasterAdmin = isMasterAdmin || isMasterAdminUnlocked;
+  const [isMasterAuthModalOpen, setIsMasterAuthModalOpen] = useState<boolean>(false);
+  const [masterAuthInput, setMasterAuthInput] = useState<string>('');
+  const [masterAuthError, setMasterAuthError] = useState<string | null>(null);
+  const [showMasterAuthInput, setShowMasterAuthInput] = useState<boolean>(false);
+
+  const handleUnlockMasterAdmin = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setMasterAuthError(null);
+    const expectedPassword = masterAdminPassword || 'garjohn@1995';
+    if (masterAuthInput.trim() === expectedPassword) {
+      setIsMasterAdminUnlocked(true);
+      setIsMasterAuthModalOpen(false);
+      setMasterAuthInput('');
+      setAdminSubTab('passwords');
+      showToast('Master Admin verified: Faculty & Admin Accounts & Passwords unlocked.');
+    } else {
+      setMasterAuthError('Incorrect Master Admin password. Access denied.');
+    }
+  };
+
+  const handleLockMasterAdmin = () => {
+    setIsMasterAdminUnlocked(false);
+    if (!isMasterAdmin && adminSubTab === 'passwords') {
+      setAdminSubTab('announcements');
+    }
+    showToast('Master Admin session locked.');
+  };
 
   // Custom Faculty Account Passwords Map
   const [customFacultyPasswords, setCustomFacultyPasswords] = useState<Record<string, string>>({});
@@ -770,27 +803,56 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       {/* Admin Sub-Navigation Tabs */}
       <div className="bg-slate-100 p-2 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-sm">
         <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={() => setAdminSubTab('passwords')}
-            className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
-              adminSubTab === 'passwords'
-                ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400 ring-offset-1 border border-emerald-600 scale-[1.02]'
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 hover:shadow-xs'
-            }`}
-          >
-            <Key className="w-4 h-4 text-emerald-200" />
-            <span>Faculty & Admin Accounts & Passwords</span>
-            {facultyRequests.length + adminRequests.length > 0 ? (
-              <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce ml-1">
-                {facultyRequests.length + adminRequests.length} Pending
-              </span>
-            ) : (
-              <span className="bg-emerald-900/60 text-emerald-100 border border-emerald-400/40 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ml-1">
-                Real-Time
-              </span>
-            )}
-          </button>
+          {/* Faculty & Admin Accounts & Passwords Tab: ONLY VISIBLE TO MASTER ADMIN */}
+          {canAccessMasterAdmin ? (
+            <div className="flex items-center space-x-1 flex-1 sm:flex-none">
+              <button
+                type="button"
+                onClick={() => setAdminSubTab('passwords')}
+                className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+                  adminSubTab === 'passwords'
+                    ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400 ring-offset-1 border border-emerald-600 scale-[1.02]'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 hover:shadow-xs'
+                }`}
+              >
+                <Key className="w-4 h-4 text-emerald-200" />
+                <span>Faculty & Admin Accounts & Passwords</span>
+                {facultyRequests.length + adminRequests.length > 0 ? (
+                  <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce ml-1">
+                    {facultyRequests.length + adminRequests.length} Pending
+                  </span>
+                ) : (
+                  <span className="bg-emerald-900/60 text-emerald-100 border border-emerald-400/40 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ml-1">
+                    Master Admin
+                  </span>
+                )}
+              </button>
+              {isMasterAdminUnlocked && !isMasterAdmin && (
+                <button
+                  type="button"
+                  onClick={handleLockMasterAdmin}
+                  className="px-2.5 py-2.5 rounded-xl bg-slate-200 hover:bg-rose-100 text-slate-700 hover:text-rose-700 transition-all cursor-pointer border border-slate-300 text-xs font-mono font-bold"
+                  title="Lock Master Admin session"
+                >
+                  <Lock className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setMasterAuthError(null);
+                setMasterAuthInput('');
+                setIsMasterAuthModalOpen(true);
+              }}
+              className="flex-1 sm:flex-none px-3.5 py-2.5 rounded-xl font-mono text-xs font-bold text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/70 transition-all cursor-pointer border border-dashed border-slate-300 hover:border-emerald-400 bg-white/70 flex items-center justify-center space-x-2"
+              title="Protected: Enter Master Admin Password to view Faculty & Admin Accounts & Passwords"
+            >
+              <Lock className="w-3.5 h-3.5 text-slate-500" />
+              <span>Master Admin Access</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -825,8 +887,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* SUB-TAB 1: FACULTY & ADMIN REAL-TIME PASSWORD CONTROL & ACCOUNTS */}
-      {adminSubTab === 'passwords' && (
+      {/* SUB-TAB 1: FACULTY & ADMIN REAL-TIME PASSWORD CONTROL & ACCOUNTS (RESTRICTED TO MASTER ADMIN) */}
+      {adminSubTab === 'passwords' && canAccessMasterAdmin && (
         <div className="space-y-6">
 
           {/* Pending Faculty Account Registration Requests */}
@@ -2226,6 +2288,97 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 >
                   <Megaphone className="w-4 h-4 text-white" />
                   <span>{editingId ? 'Save Advisory Changes' : 'Publish Advisory Now'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MASTER ADMIN PASSWORD UNLOCK MODAL */}
+      {isMasterAuthModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
+            <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-500/20 text-emerald-300 rounded-2xl border border-emerald-400/30">
+                  <ShieldCheck className="w-5 h-5 text-emerald-300" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold font-sans">Master Admin Authentication</h3>
+                  <p className="text-[11px] text-emerald-200/80 font-mono">Restricted Access Control</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMasterAuthModalOpen(false);
+                  setMasterAuthInput('');
+                  setMasterAuthError(null);
+                }}
+                className="p-1.5 hover:bg-white/10 rounded-xl text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUnlockMasterAdmin} className="p-6 space-y-4">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-mono text-amber-800 space-y-1">
+                <div className="font-bold flex items-center space-x-1.5">
+                  <Lock className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Confidential Management Zone</span>
+                </div>
+                <p className="text-[11px] text-amber-700">
+                  The Faculty & Admin Accounts & Passwords page is strictly reserved for the Master Admin. Please enter the Master Admin Password to proceed.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono font-bold text-slate-700 uppercase mb-1.5">
+                  Master Admin Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showMasterAuthInput ? 'text' : 'password'}
+                    value={masterAuthInput}
+                    onChange={(e) => setMasterAuthInput(e.target.value)}
+                    placeholder="Enter Master Admin Password"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-hidden pr-10"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMasterAuthInput(!showMasterAuthInput)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showMasterAuthInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {masterAuthError && (
+                  <p className="text-xs font-mono text-rose-600 font-bold mt-1.5 flex items-center space-x-1">
+                    <span>⚠️ {masterAuthError}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMasterAuthModalOpen(false);
+                    setMasterAuthInput('');
+                    setMasterAuthError(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-mono font-bold text-xs rounded-xl cursor-pointer shadow-2xs flex items-center space-x-1.5"
+                >
+                  <Key className="w-4 h-4 text-emerald-200" />
+                  <span>Verify & Unlock</span>
                 </button>
               </div>
             </form>
