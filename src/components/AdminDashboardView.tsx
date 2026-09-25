@@ -33,6 +33,8 @@ import {
   getStoredSchoolPermanentFolders,
   subscribeSchoolPermanentFolders,
   updateSchoolPermanentFolderInFirestore,
+  addSchoolPermanentFolderToFirestore,
+  deleteSchoolPermanentFolderFromFirestore,
   INITIAL_SCHOOL_PERMANENT_FOLDERS,
   extractDriveId,
 } from '../lib/firebase';
@@ -70,6 +72,11 @@ import {
   RotateCcw,
   FileSpreadsheet,
   ExternalLink,
+  FolderPlus,
+  Folder,
+  Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -79,7 +86,17 @@ interface AdminDashboardViewProps {
   facultyFolders?: FacultyFolder[];
   facultyFiles?: FacultyPersonalFile[];
   schoolPermanentFolders?: SchoolPermanentFolder[];
-  onUpdateSchoolPermanentFolder?: (id: 'school-forms' | 'school-documents', updates: { driveUrl?: string; description?: string; updatedBy?: string }) => void;
+  onUpdateSchoolPermanentFolder?: (id: string, updates: Partial<SchoolPermanentFolder>) => void;
+  onAddSchoolPermanentFolder?: (folder: {
+    name: string;
+    description: string;
+    driveUrl: string;
+    category?: string;
+    color?: string;
+    createdBy?: string;
+    updatedBy?: string;
+  }) => Promise<void> | void;
+  onDeleteSchoolPermanentFolder?: (id: string) => Promise<void> | void;
   onAddAnnouncement: (announcement: Omit<Announcement, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onEditAnnouncement: (id: string, updated: Partial<Announcement>) => void;
   onDeleteAnnouncement: (id: string) => void;
@@ -102,6 +119,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   facultyFiles = [],
   schoolPermanentFolders: propPermanentFolders,
   onUpdateSchoolPermanentFolder,
+  onAddSchoolPermanentFolder,
+  onDeleteSchoolPermanentFolder,
   onAddAnnouncement,
   onEditAnnouncement,
   onDeleteAnnouncement,
@@ -260,6 +279,208 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       });
       showToast('⚡ SCHOOL DOCUMENTS link reset to default.');
     }
+  };
+
+  // Additional School Folders (Created by Coordinator / Admin)
+  const customSchoolFolders = useMemo(() => {
+    return schoolFolders.filter((f) => f.id !== 'school-forms' && f.id !== 'school-documents');
+  }, [schoolFolders]);
+
+  // Modal & Form State for Adding / Editing School Folders
+  const [isAddFolderModalOpen, setIsAddFolderModalOpen] = useState<boolean>(false);
+  const [editingSchoolFolder, setEditingSchoolFolder] = useState<SchoolPermanentFolder | null>(null);
+  const [folderFormName, setFolderFormName] = useState<string>('');
+  const [folderFormUrl, setFolderFormUrl] = useState<string>('');
+  const [folderFormDesc, setFolderFormDesc] = useState<string>('');
+  const [folderFormCategory, setFolderFormCategory] = useState<string>('Instructional Materials');
+  const [folderFormColor, setFolderFormColor] = useState<string>('Purple');
+  const [isSavingFolder, setIsSavingFolder] = useState<boolean>(false);
+  const [folderSearchTerm, setFolderSearchTerm] = useState<string>('');
+  const [folderCategoryFilter, setFolderCategoryFilter] = useState<string>('all');
+  const [folderToDelete, setFolderToDelete] = useState<SchoolPermanentFolder | null>(null);
+  const [previewWebviewFolderId, setPreviewWebviewFolderId] = useState<string | null>(null);
+  const [copiedDriveId, setCopiedDriveId] = useState<string | null>(null);
+
+  const QUICK_FOLDER_PRESETS = [
+    {
+      title: 'Action Research & Innovation',
+      category: 'Instructional Materials',
+      color: 'Purple',
+      desc: 'Central depository for DepEd action research proposals, approved papers, completed studies, innovation projects, and templates.',
+    },
+    {
+      title: 'INSET & LAC Session Materials',
+      category: 'Faculty Development',
+      color: 'Amber',
+      desc: 'In-Service Training slide decks, Learning Action Cell (LAC) session guides, attendance records, and training certificates.',
+    },
+    {
+      title: 'Curriculum Guides & MELCs',
+      category: 'General Subject Materials',
+      color: 'Indigo',
+      desc: 'Senior High School Most Essential Learning Competencies (MELCs), curriculum matrix, course syllabi, and teaching guides.',
+    },
+    {
+      title: 'Assessment Tools & Item Banks',
+      category: 'Curriculum & Assessment',
+      color: 'Rose',
+      desc: 'Quarterly and periodic examination TOS, test questions banks, rubrics, diagnostic tests, and mastery assessment materials.',
+    },
+    {
+      title: 'Faculty Clearances & Checklists',
+      category: 'DepEd Forms & Portfolio',
+      color: 'Teal',
+      desc: 'End-of-school-year clearance requirements, department checklists, property inventory forms, and teacher accomplishment reports.',
+    },
+    {
+      title: 'School Memorandums & DepEd Orders',
+      category: 'School Documents',
+      color: 'Blue',
+      desc: 'Division memorandums, regional advisories, school orders, and department administrative circulars.',
+    },
+  ];
+
+  const filteredCustomFolders = useMemo(() => {
+    return customSchoolFolders.filter((f) => {
+      const matchSearch =
+        folderSearchTerm === '' ||
+        f.name.toLowerCase().includes(folderSearchTerm.toLowerCase()) ||
+        (f.description && f.description.toLowerCase().includes(folderSearchTerm.toLowerCase())) ||
+        (f.category && f.category.toLowerCase().includes(folderSearchTerm.toLowerCase()));
+      const matchCategory =
+        folderCategoryFilter === 'all' || f.category === folderCategoryFilter;
+      return matchSearch && matchCategory;
+    });
+  }, [customSchoolFolders, folderSearchTerm, folderCategoryFilter]);
+
+  const handleOpenAddFolderModal = () => {
+    setEditingSchoolFolder(null);
+    setFolderFormName('');
+    setFolderFormUrl('');
+    setFolderFormDesc('');
+    setFolderFormCategory('Instructional Materials');
+    setFolderFormColor('Purple');
+    setIsAddFolderModalOpen(true);
+  };
+
+  const handleOpenEditFolderModal = (folder: SchoolPermanentFolder) => {
+    setEditingSchoolFolder(folder);
+    setFolderFormName(folder.name);
+    setFolderFormUrl(folder.driveUrl);
+    setFolderFormDesc(folder.description || '');
+    setFolderFormCategory(folder.category || 'School Documents');
+    setFolderFormColor(folder.color || 'Indigo');
+    setIsAddFolderModalOpen(true);
+  };
+
+  const handleSelectPreset = (preset: typeof QUICK_FOLDER_PRESETS[0]) => {
+    setFolderFormName(preset.title);
+    setFolderFormCategory(preset.category);
+    setFolderFormColor(preset.color);
+    setFolderFormDesc(preset.desc);
+  };
+
+  const handleSaveSchoolFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!folderFormName.trim()) {
+      showToast('⚠️ Please enter a folder name.');
+      return;
+    }
+    if (!folderFormUrl.trim()) {
+      showToast('⚠️ Please enter a valid Google Drive folder URL.');
+      return;
+    }
+
+    setIsSavingFolder(true);
+    const driveId = extractDriveId(folderFormUrl.trim()) || '';
+    const creatorName = currentUser.name || (isCoordinator ? 'Coordinator' : 'Admin');
+
+    try {
+      if (editingSchoolFolder) {
+        if (onUpdateSchoolPermanentFolder) {
+          await onUpdateSchoolPermanentFolder(editingSchoolFolder.id, {
+            name: folderFormName.trim(),
+            driveUrl: folderFormUrl.trim(),
+            description: folderFormDesc.trim(),
+            category: folderFormCategory,
+            color: folderFormColor,
+            driveId,
+            updatedBy: creatorName,
+          });
+        } else {
+          await updateSchoolPermanentFolderInFirestore(editingSchoolFolder.id, {
+            name: folderFormName.trim(),
+            driveUrl: folderFormUrl.trim(),
+            description: folderFormDesc.trim(),
+            category: folderFormCategory,
+            color: folderFormColor,
+            driveId,
+            updatedBy: creatorName,
+          });
+        }
+        showToast(`⚡ Folder "${folderFormName.trim()}" updated successfully!`);
+      } else {
+        if (onAddSchoolPermanentFolder) {
+          await onAddSchoolPermanentFolder({
+            name: folderFormName.trim(),
+            driveUrl: folderFormUrl.trim(),
+            description: folderFormDesc.trim(),
+            category: folderFormCategory,
+            color: folderFormColor,
+            createdBy: creatorName,
+            updatedBy: creatorName,
+          });
+        } else {
+          await addSchoolPermanentFolderToFirestore({
+            name: folderFormName.trim(),
+            driveUrl: folderFormUrl.trim(),
+            description: folderFormDesc.trim(),
+            category: folderFormCategory,
+            color: folderFormColor,
+            createdBy: creatorName,
+            updatedBy: creatorName,
+          });
+        }
+        showToast(`⚡ New folder "${folderFormName.trim()}" added to all faculty workspaces!`);
+      }
+      setIsAddFolderModalOpen(false);
+    } catch (err) {
+      console.error('Error saving school folder:', err);
+      showToast('⚠️ Error saving folder. Please check connection.');
+    } finally {
+      setIsSavingFolder(false);
+    }
+  };
+
+  const handleDeleteSchoolFolderConfirm = (folder: SchoolPermanentFolder) => {
+    if (folder.id === 'school-forms' || folder.id === 'school-documents') {
+      showToast('⚠️ Default system school folders cannot be deleted.');
+      return;
+    }
+    setFolderToDelete(folder);
+  };
+
+  const handleExecuteDeleteFolder = async () => {
+    if (!folderToDelete) return;
+    try {
+      if (onDeleteSchoolPermanentFolder) {
+        await onDeleteSchoolPermanentFolder(folderToDelete.id);
+      } else {
+        await deleteSchoolPermanentFolderFromFirestore(folderToDelete.id);
+      }
+      showToast(`🗑️ Folder "${folderToDelete.name}" removed from workspaces.`);
+      setFolderToDelete(null);
+    } catch (err) {
+      console.error('Error deleting school folder:', err);
+      showToast('⚠️ Error deleting folder.');
+    }
+  };
+
+  const copyFolderLink = (url: string, id: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedDriveId(id);
+    showToast('Copied Google Drive link to clipboard!');
+    setTimeout(() => setCopiedDriveId(null), 2000);
   };
 
   // Master Faculty Password State
@@ -982,14 +1203,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-xl font-bold font-mono text-slate-900 tracking-tight">
-                  SVNHS Admin Security & Management Dashboard
+                  {isCoordinator ? 'SVNHS Coordinator Dashboard' : 'SVNHS Admin Security & Management Dashboard'}
                 </h1>
                 <span className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] px-2 py-0.5 rounded font-mono font-extrabold uppercase">
-                  MASTER CONTROL
+                  {isCoordinator ? 'COORDINATOR PANEL' : 'MASTER CONTROL'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                San Vicente National High School • Administrator Panel
+                {isCoordinator ? 'San Vicente National High School • Senior High School Coordinator Panel' : 'San Vicente National High School • Administrator Panel'}
               </p>
             </div>
           </div>
@@ -1074,7 +1295,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             }`}
           >
             <FolderLock className="w-4 h-4 text-indigo-200" />
-            <span>School Forms & Documents (2)</span>
+            <span>School Forms & Documents ({schoolFolders.length})</span>
           </button>
         </div>
 
@@ -2661,7 +2882,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 <div className="flex items-center space-x-2">
                   <span className="bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase flex items-center space-x-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-indigo-300" />
-                    <span>School Administration Central Links</span>
+                    <span>{isCoordinator ? 'Coordinator Central Folders' : 'School Administration Central Links'}</span>
                   </span>
                   <span className="bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -2669,25 +2890,93 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   </span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-bold font-sans tracking-tight">
-                  Permanent School Folders Management
+                  School Forms & Documents Management
                 </h2>
                 <p className="text-xs sm:text-sm text-indigo-100/90 max-w-2xl leading-relaxed">
-                  Configure the official Google Drive folders for <strong className="text-white">"SCHOOL FORMS"</strong> and <strong className="text-white">"SCHOOL DOCUMENTS"</strong>.
-                  These two folders appear permanently in every faculty member's <strong className="text-white">"My Workspace"</strong> page. Only authorized administrators can set or update the embedded Google Drive links.
+                  Manage the official Google Drive folders for <strong className="text-white">"SCHOOL FORMS"</strong>, <strong className="text-white">"SCHOOL DOCUMENTS"</strong>, and add necessary department folders. These folders appear permanently in every faculty member's <strong className="text-white">"My Workspace"</strong> view.
                 </p>
               </div>
 
-              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/15 text-xs font-mono text-indigo-100 space-y-1.5 shrink-0">
-                <div className="text-[11px] text-indigo-300 font-bold uppercase">Folder Targets</div>
-                <div className="flex items-center space-x-2 font-bold text-white">
-                  <FolderLock className="w-4 h-4 text-emerald-300" />
-                  <span>2 Permanent Folders</span>
-                </div>
-                <div className="text-[10px] text-indigo-200">
-                  Shared across {facultyList.length} Faculty Members
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleOpenAddFolderModal}
+                  className="px-4 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-2xl text-xs font-mono shadow-md flex items-center justify-center space-x-2 transition-all hover:scale-105 cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4 text-slate-950" />
+                  <span>+ Add School Folder</span>
+                </button>
+
+                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/15 text-xs font-mono text-indigo-100 space-y-1.5 shrink-0">
+                  <div className="text-[11px] text-indigo-300 font-bold uppercase">Folder Targets</div>
+                  <div className="flex items-center space-x-2 font-bold text-white">
+                    <FolderLock className="w-4 h-4 text-emerald-300" />
+                    <span>{schoolFolders.length} Central Folders</span>
+                  </div>
+                  <div className="text-[10px] text-indigo-200">
+                    Shared across {facultyList.length} Faculty Members
+                  </div>
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Quick Filter & Action Bar */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search school folders by name, category, or notes..."
+                  value={folderSearchTerm}
+                  onChange={(e) => setFolderSearchTerm(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <select
+                  value={folderCategoryFilter}
+                  onChange={(e) => setFolderCategoryFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  <option value="all">All Categories ({schoolFolders.length})</option>
+                  <option value="DepEd Forms & Portfolio">DepEd Forms & Portfolio</option>
+                  <option value="School Documents">School Documents</option>
+                  <option value="General Subject Materials">General Subject Materials</option>
+                  <option value="Instructional Materials">Instructional Materials</option>
+                  <option value="Faculty Development">Faculty Development</option>
+                  <option value="Curriculum & Assessment">Curriculum & Assessment</option>
+                  <option value="Administrative & Clearance">Administrative & Clearance</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenAddFolderModal}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-mono font-bold flex items-center justify-center space-x-2 transition-all shadow-xs cursor-pointer shrink-0"
+            >
+              <FolderPlus className="w-4 h-4" />
+              <span>Add Folder</span>
+            </button>
+          </div>
+
+          {/* SECTION HEADER: CORE PERMANENT SYSTEM FOLDERS */}
+          <div className="flex items-center justify-between border-b border-slate-200 pb-2 pt-2">
+            <div className="flex items-center space-x-2">
+              <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900">
+                Core DepEd Permanent System Folders (2)
+              </h3>
+            </div>
+            <span className="text-[11px] font-mono text-slate-500">
+              Anchored in all faculty workspaces
+            </span>
           </div>
 
           {/* TWO PERMANENT FOLDER EDITORS */}
@@ -2997,23 +3286,531 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </div>
           </div>
 
+          {/* SECTION HEADER: ADDITIONAL DEPARTMENT & COORDINATOR FOLDERS */}
+          <div className="space-y-4 pt-4 border-t border-slate-200">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl shadow-2xs">
+                  <Folder className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-mono font-bold uppercase tracking-wider text-slate-900 flex items-center space-x-2">
+                    <span>Department & Coordinator Folders</span>
+                    <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.2 rounded-full font-bold">
+                      {customSchoolFolders.length} Folders
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Additional shared folders created by coordinators and administrators for all faculty workspaces.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenAddFolderModal}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-2xs cursor-pointer"
+              >
+                <FolderPlus className="w-4 h-4" />
+                <span>+ Add School Folder</span>
+              </button>
+            </div>
+
+            {filteredCustomFolders.length === 0 ? (
+              <div className="bg-slate-50 border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-3xl p-8 text-center space-y-4 transition-colors">
+                <div className="w-14 h-14 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-2xl mx-auto flex items-center justify-center shadow-2xs">
+                  <FolderPlus className="w-7 h-7" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h4 className="font-bold text-slate-800 text-sm font-sans">
+                    {customSchoolFolders.length === 0 ? 'No Additional Department Folders Yet' : 'No Folders Match Filters'}
+                  </h4>
+                  <p className="text-xs text-slate-500 font-mono leading-relaxed">
+                    {customSchoolFolders.length === 0
+                      ? 'Coordinators can add necessary shared Google Drive folders for INSET / LAC sessions, Action Research, MELCs Guides, or Assessment Banks.'
+                      : `Try clearing your search query "${folderSearchTerm}" or category filter.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAddFolderModal}
+                  className="inline-flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-mono font-bold rounded-xl transition-all shadow-sm cursor-pointer hover:scale-105"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add First Department Folder</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {filteredCustomFolders.map((folder) => {
+                  let borderClass = 'border-slate-200 hover:border-indigo-400/80';
+                  let headerIconBg = 'bg-indigo-600';
+                  let badgeBg = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+
+                  if (folder.color === 'Purple') {
+                    borderClass = 'border-slate-200 hover:border-purple-400/80';
+                    headerIconBg = 'bg-purple-600';
+                    badgeBg = 'bg-purple-50 text-purple-700 border-purple-200';
+                  } else if (folder.color === 'Amber') {
+                    borderClass = 'border-slate-200 hover:border-amber-400/80';
+                    headerIconBg = 'bg-amber-600';
+                    badgeBg = 'bg-amber-50 text-amber-700 border-amber-200';
+                  } else if (folder.color === 'Rose') {
+                    borderClass = 'border-slate-200 hover:border-rose-400/80';
+                    headerIconBg = 'bg-rose-600';
+                    badgeBg = 'bg-rose-50 text-rose-700 border-rose-200';
+                  } else if (folder.color === 'Teal') {
+                    borderClass = 'border-slate-200 hover:border-teal-400/80';
+                    headerIconBg = 'bg-teal-600';
+                    badgeBg = 'bg-teal-50 text-teal-700 border-teal-200';
+                  } else if (folder.color === 'Blue') {
+                    borderClass = 'border-slate-200 hover:border-blue-400/80';
+                    headerIconBg = 'bg-blue-600';
+                    badgeBg = 'bg-blue-50 text-blue-700 border-blue-200';
+                  } else if (folder.color === 'Emerald') {
+                    borderClass = 'border-slate-200 hover:border-emerald-400/80';
+                    headerIconBg = 'bg-emerald-600';
+                    badgeBg = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                  }
+
+                  const isPreviewOpen = previewWebviewFolderId === folder.id;
+
+                  return (
+                    <div
+                      key={folder.id}
+                      className={`bg-white border-2 ${borderClass} rounded-3xl p-6 shadow-sm space-y-5 transition-all flex flex-col justify-between`}
+                    >
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                          <div className="flex items-center space-x-3">
+                            <div className={`p-3 ${headerIconBg} text-white rounded-2xl shadow-xs shrink-0`}>
+                              <FolderLock className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border uppercase ${badgeBg}`}>
+                                  {folder.category || 'School Documents'}
+                                </span>
+                                <span className="text-[10px] font-mono text-slate-500 font-semibold flex items-center space-x-1">
+                                  <Lock className="w-3 h-3 text-slate-400" />
+                                  <span>All Workspaces</span>
+                                </span>
+                              </div>
+                              <h3 className="text-lg font-bold text-slate-900 mt-1">
+                                {folder.name}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditFolderModal(folder)}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                              title="Edit Folder Details"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSchoolFolderConfirm(folder)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                              title="Delete Folder"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {folder.description && (
+                          <p className="text-xs text-slate-600 leading-relaxed font-sans bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                            {folder.description}
+                          </p>
+                        )}
+
+                        <div className="space-y-1.5 text-xs font-mono">
+                          <div className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                            <span className="flex items-center space-x-1.5">
+                              <Link className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Embedded Google Drive Link</span>
+                            </span>
+                            {folder.driveId && (
+                              <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                                Drive ID: {folder.driveId.substring(0, 14)}...
+                              </span>
+                            )}
+                          </div>
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-slate-700 truncate max-w-xs font-mono">
+                              {folder.driveUrl}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => copyFolderLink(folder.driveUrl, folder.id)}
+                              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200 transition-colors shrink-0 cursor-pointer"
+                              title="Copy Link"
+                            >
+                              {copiedDriveId === folder.id ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewWebviewFolderId(isPreviewOpen ? null : folder.id)
+                            }
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-slate-600" />
+                            <span>{isPreviewOpen ? 'Hide Preview' : 'Preview Webview'}</span>
+                          </button>
+
+                          {folder.driveUrl && (
+                            <a
+                              href={folder.driveUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                              title="Open in new browser tab"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>Open Drive</span>
+                            </a>
+                          )}
+                        </div>
+
+                        <span className="text-[10px] text-slate-400">
+                          {folder.updatedBy ? `Set by: ${folder.updatedBy}` : 'Central Repository'}
+                        </span>
+                      </div>
+
+                      {/* Embedded Webview Preview */}
+                      {isPreviewOpen && (
+                        <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                            <span className="font-bold flex items-center space-x-1.5">
+                              <FolderLock className="w-4 h-4 text-indigo-600" />
+                              <span>Live Drive Webview ({folder.name})</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setPreviewWebviewFolderId(null)}
+                              className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <GoogleDriveWebview
+                            driveUrl={folder.driveUrl || ''}
+                            title={`${folder.name} Preview`}
+                            height="380px"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Add Folder Card at end of grid */}
+                <button
+                  type="button"
+                  onClick={handleOpenAddFolderModal}
+                  className="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50/60 hover:bg-indigo-50/40 rounded-3xl p-6 text-center flex flex-col items-center justify-center space-y-3 transition-all cursor-pointer group min-h-[220px]"
+                >
+                  <div className="p-4 bg-indigo-100 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white rounded-2xl transition-all shadow-xs group-hover:scale-110">
+                    <FolderPlus className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 group-hover:text-indigo-900 text-sm font-sans">
+                      Add Another School Folder
+                    </div>
+                    <div className="text-xs text-slate-500 font-mono mt-1 max-w-xs">
+                      Create a shared department repository for INSET, MELCs, Action Research, or Assessment Banks.
+                    </div>
+                  </div>
+                  <span className="px-3.5 py-1.5 bg-white group-hover:bg-indigo-600 group-hover:text-white text-indigo-700 text-xs font-mono font-bold rounded-xl border border-indigo-200 group-hover:border-indigo-600 transition-all shadow-2xs">
+                    + Add Folder Now
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Quick Explanatory Guide Card */}
           <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-xs font-mono text-slate-600 space-y-3">
             <div className="flex items-center space-x-2 text-slate-900 font-bold">
               <ShieldCheck className="w-4 h-4 text-blue-600" />
-              <span className="uppercase tracking-wider">Administrator Instructions & Permission Guide</span>
+              <span className="uppercase tracking-wider">Coordinator & Administrator Instructions</span>
             </div>
             <ul className="list-disc pl-5 space-y-1.5 text-slate-600 leading-relaxed">
               <li>
-                <strong>Visibility:</strong> Both folders are permanently anchored at the top of the <strong className="text-slate-800">"My Workspace"</strong> view for every registered faculty member. Teachers cannot delete or rename them.
+                <strong>Visibility:</strong> All configured folders appear permanently anchored in the <strong className="text-slate-800">"My Workspace"</strong> view for every registered faculty member. Teachers cannot delete or rename them.
               </li>
               <li>
-                <strong>Central Link Management:</strong> Only administrators accessing this dashboard can update the embedded Google Drive URLs. Once saved, the new link immediately updates across all teacher workspaces.
+                <strong>Adding Necessary Folders:</strong> Coordinators and administrators can add folders for specific department needs such as Action Research, INSET materials, MELCs curriculum guides, or assessment banks.
               </li>
               <li>
-                <strong>Drive Permissions:</strong> To ensure all faculty members can view and download files without access requests, set the Google Drive folder share permissions to <strong className="text-slate-800">"Department of Education (DepEd)"</strong> or <strong className="text-slate-800">"Anyone with the link can view"</strong>.
+                <strong>Central Link Management:</strong> Once saved, any new folder or updated Google Drive link immediately updates across all teacher workspaces in real time.
+              </li>
+              <li>
+                <strong>Drive Permissions:</strong> Ensure shared Google Drive folder permissions are set to <strong className="text-slate-800">"Department of Education (DepEd)"</strong> or <strong className="text-slate-800">"Anyone with the link can view"</strong> so faculty members can open and download files seamlessly.
               </li>
             </ul>
+          </div>
+        </div>
+      )}
+
+      {/* ADD / EDIT SCHOOL FOLDER MODAL */}
+      {isAddFolderModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-fadeIn">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-2xl overflow-hidden my-8 animate-scaleUp">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 text-white p-6 relative">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-emerald-500 text-slate-950 rounded-2xl shadow-xs">
+                  <FolderPlus className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md uppercase">
+                      School Permanent Repository
+                    </span>
+                    <span className="bg-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md">
+                      All Faculty
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-bold font-sans tracking-tight mt-1 text-white">
+                    {editingSchoolFolder ? 'Edit School Folder' : 'Add New School Folder'}
+                  </h3>
+                  <p className="text-xs text-indigo-100/90 font-mono mt-0.5">
+                    This folder will be instantly synchronized across all faculty members' workspaces.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddFolderModalOpen(false)}
+                className="absolute right-5 top-5 text-indigo-200 hover:text-white p-1 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSaveSchoolFolder} className="p-6 space-y-5 text-xs font-mono">
+              {/* Quick Template Presets for Coordinators (only on create) */}
+              {!editingSchoolFolder && (
+                <div className="space-y-2 bg-indigo-50/60 border border-indigo-100 rounded-2xl p-4">
+                  <div className="flex items-center space-x-1.5 text-indigo-900 font-bold text-[11px] uppercase tracking-wider">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Coordinator Quick Suggestions (Click to fill)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {QUICK_FOLDER_PRESETS.map((preset) => (
+                      <button
+                        key={preset.title}
+                        type="button"
+                        onClick={() => handleSelectPreset(preset)}
+                        className={`text-[11px] font-mono px-2.5 py-1 rounded-xl border transition-all text-left flex items-center space-x-1.5 cursor-pointer ${
+                          folderFormName === preset.title
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-bold'
+                            : 'bg-white hover:bg-indigo-100/80 text-indigo-950 border-indigo-200'
+                        }`}
+                      >
+                        <span>{preset.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Folder Name */}
+              <div>
+                <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                  Folder Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={folderFormName}
+                  onChange={(e) => setFolderFormName(e.target.value)}
+                  placeholder="e.g., Action Research & Innovation, INSET Materials, MELCs..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white font-mono transition-all"
+                />
+              </div>
+
+              {/* Google Drive Link */}
+              <div>
+                <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span className="flex items-center space-x-1.5">
+                    <Link className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Embedded Google Drive Link *</span>
+                  </span>
+                  {extractDriveId(folderFormUrl) ? (
+                    <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                      Drive ID: {extractDriveId(folderFormUrl)?.substring(0, 14)}...
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400">Standard Google Drive folder URL</span>
+                  )}
+                </label>
+                <input
+                  type="url"
+                  required
+                  value={folderFormUrl}
+                  onChange={(e) => setFolderFormUrl(e.target.value)}
+                  placeholder="https://drive.google.com/drive/folders/..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white font-mono transition-all"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Paste the shared Google Drive folder URL. Make sure permissions are set to "Anyone with the link can view".
+                </p>
+              </div>
+
+              {/* Category & Color Picker Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                    Folder Category
+                  </label>
+                  <select
+                    value={folderFormCategory}
+                    onChange={(e) => setFolderFormCategory(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="Instructional Materials">Instructional Materials</option>
+                    <option value="Faculty Development">Faculty Development</option>
+                    <option value="Curriculum & Assessment">Curriculum & Assessment</option>
+                    <option value="DepEd Forms & Portfolio">DepEd Forms & Portfolio</option>
+                    <option value="School Documents">School Documents</option>
+                    <option value="General Subject Materials">General Subject Materials</option>
+                    <option value="Administrative & Clearance">Administrative & Clearance</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                    Theme Color Accent
+                  </label>
+                  <div className="flex items-center space-x-2 pt-1">
+                    {[
+                      { name: 'Indigo', bg: 'bg-indigo-600' },
+                      { name: 'Purple', bg: 'bg-purple-600' },
+                      { name: 'Amber', bg: 'bg-amber-600' },
+                      { name: 'Rose', bg: 'bg-rose-600' },
+                      { name: 'Teal', bg: 'bg-teal-600' },
+                      { name: 'Blue', bg: 'bg-blue-600' },
+                      { name: 'Emerald', bg: 'bg-emerald-600' },
+                    ].map((col) => (
+                      <button
+                        key={col.name}
+                        type="button"
+                        onClick={() => setFolderFormColor(col.name)}
+                        className={`w-7 h-7 rounded-xl ${col.bg} transition-all flex items-center justify-center cursor-pointer ${
+                          folderFormColor === col.name ? 'ring-2 ring-slate-900 ring-offset-2 scale-110' : 'opacity-70 hover:opacity-100'
+                        }`}
+                        title={col.name}
+                      >
+                        {folderFormColor === col.name && <Check className="w-3.5 h-3.5 text-white" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                  Folder Description & Faculty Instructions
+                </label>
+                <textarea
+                  rows={3}
+                  value={folderFormDesc}
+                  onChange={(e) => setFolderFormDesc(e.target.value)}
+                  placeholder="Provide notes or guidelines for faculty regarding files and submissions in this folder..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white font-mono transition-all resize-none"
+                />
+              </div>
+
+              {/* Footer Actions */}
+              <div className="pt-4 border-t border-slate-200 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setIsAddFolderModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSavingFolder}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm flex items-center space-x-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingFolder ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Folder...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{editingSchoolFolder ? 'Save Changes' : 'Create School Folder'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {folderToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md p-6 space-y-4 animate-scaleUp font-mono text-xs">
+            <div className="flex items-center space-x-3 text-rose-600">
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 font-sans">
+                  Delete School Folder?
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Permanent removal from all workspaces
+                </p>
+              </div>
+            </div>
+
+            <p className="text-slate-600 leading-relaxed">
+              Are you sure you want to delete <strong className="text-slate-900">"{folderToDelete.name}"</strong>? This will remove this central folder from all faculty members' workspaces in real time.
+            </p>
+
+            <div className="pt-2 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setFolderToDelete(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteDeleteFolder}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs cursor-pointer"
+              >
+                Delete Folder
+              </button>
+            </div>
           </div>
         </div>
       )}

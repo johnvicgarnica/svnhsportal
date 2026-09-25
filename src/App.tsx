@@ -57,6 +57,8 @@ import {
   subscribeSchoolPermanentFolders,
   getStoredSchoolPermanentFolders,
   updateSchoolPermanentFolderInFirestore,
+  addSchoolPermanentFolderToFirestore,
+  deleteSchoolPermanentFolderFromFirestore,
 } from './lib/firebase';
 
 export function App() {
@@ -177,7 +179,7 @@ export function App() {
     return () => unsub();
   }, []);
 
-  // School Permanent Folders (SCHOOL FORMS & SCHOOL DOCUMENTS)
+  // School Permanent Folders (SCHOOL FORMS, SCHOOL DOCUMENTS & Coordinator Folders)
   const [schoolPermanentFolders, setSchoolPermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
     return getStoredSchoolPermanentFolders();
   });
@@ -192,10 +194,26 @@ export function App() {
   }, []);
 
   const handleUpdateSchoolPermanentFolder = async (
-    id: 'school-forms' | 'school-documents',
-    updates: { driveUrl?: string; description?: string; updatedBy?: string }
+    id: string,
+    updates: Partial<SchoolPermanentFolder>
   ) => {
     await updateSchoolPermanentFolderInFirestore(id, updates);
+  };
+
+  const handleAddSchoolPermanentFolder = async (folderData: {
+    name: string;
+    description: string;
+    driveUrl: string;
+    category?: string;
+    color?: string;
+    createdBy?: string;
+    updatedBy?: string;
+  }) => {
+    await addSchoolPermanentFolderToFirestore(folderData);
+  };
+
+  const handleDeleteSchoolPermanentFolder = async (id: string) => {
+    await deleteSchoolPermanentFolderFromFirestore(id);
   };
 
   // Filter States
@@ -633,6 +651,8 @@ export function App() {
               facultyFiles={facultyFiles}
               schoolPermanentFolders={schoolPermanentFolders}
               onUpdateSchoolPermanentFolder={handleUpdateSchoolPermanentFolder}
+              onAddSchoolPermanentFolder={handleAddSchoolPermanentFolder}
+              onDeleteSchoolPermanentFolder={handleDeleteSchoolPermanentFolder}
               onAddAnnouncement={handleAddAnnouncement}
               onEditAnnouncement={handleEditAnnouncement}
               onDeleteAnnouncement={handleDeleteAnnouncement}

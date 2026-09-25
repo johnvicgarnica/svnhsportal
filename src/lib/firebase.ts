@@ -1705,8 +1705,8 @@ export const saveSchoolPermanentFoldersToFirestore = async (folders: SchoolPerma
 };
 
 export const updateSchoolPermanentFolderInFirestore = async (
-  id: 'school-forms' | 'school-documents',
-  updates: { driveUrl?: string; description?: string; driveId?: string; updatedBy?: string }
+  id: string,
+  updates: Partial<SchoolPermanentFolder>
 ) => {
   try {
     const current = getStoredSchoolPermanentFolders();
@@ -1717,7 +1717,7 @@ export const updateSchoolPermanentFolderInFirestore = async (
           ...f,
           ...updates,
           driveUrl,
-          driveId: extractDriveId(driveUrl) || f.driveId || '',
+          driveId: extractDriveId(driveUrl) || updates.driveId || f.driveId || '',
           updatedAt: new Date().toISOString(),
         };
       }
@@ -1727,6 +1727,59 @@ export const updateSchoolPermanentFolderInFirestore = async (
     await saveSchoolPermanentFoldersToFirestore(updatedList);
   } catch (err) {
     console.error('Error updating school permanent folder in Firestore:', err);
+    throw err;
+  }
+};
+
+export const addSchoolPermanentFolderToFirestore = async (
+  folderData: {
+    name: string;
+    description: string;
+    driveUrl: string;
+    category?: string;
+    color?: string;
+    createdBy?: string;
+    updatedBy?: string;
+  }
+): Promise<SchoolPermanentFolder> => {
+  try {
+    const current = getStoredSchoolPermanentFolders();
+    const newId = `school-folder-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const newFolder: SchoolPermanentFolder = {
+      id: newId,
+      name: folderData.name.trim(),
+      description: folderData.description.trim(),
+      driveUrl: folderData.driveUrl.trim(),
+      driveId: extractDriveId(folderData.driveUrl.trim()) || '',
+      category: folderData.category || 'School Documents',
+      color: folderData.color || 'Indigo',
+      isPermanent: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: folderData.updatedBy || 'Coordinator',
+      createdBy: folderData.createdBy || 'Coordinator',
+    };
+
+    const updatedList = [...current, newFolder];
+    await saveSchoolPermanentFoldersToFirestore(updatedList);
+    return newFolder;
+  } catch (err) {
+    console.error('Error adding school permanent folder to Firestore:', err);
+    throw err;
+  }
+};
+
+export const deleteSchoolPermanentFolderFromFirestore = async (id: string): Promise<void> => {
+  try {
+    if (id === 'school-forms' || id === 'school-documents') {
+      throw new Error('Default system school folders cannot be deleted.');
+    }
+    const current = getStoredSchoolPermanentFolders();
+    const updatedList = current.filter((f) => f.id !== id);
+    await saveSchoolPermanentFoldersToFirestore(updatedList);
+  } catch (err) {
+    console.error('Error deleting school permanent folder from Firestore:', err);
+    throw err;
   }
 };
 
@@ -1739,28 +1792,32 @@ export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPerman
         if (Array.isArray(data.folders) && data.folders.length > 0) {
           const loaded: SchoolPermanentFolder[] = data.folders.map((f: Partial<SchoolPermanentFolder>) => {
             const isForms = f.id === 'school-forms';
+            const isDocs = f.id === 'school-documents';
             return {
-              id: isForms ? 'school-forms' : 'school-documents',
-              name: isForms ? 'SCHOOL FORMS' : 'SCHOOL DOCUMENTS',
-              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms.' : 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies.'),
+              id: f.id || `school-folder-${Date.now()}`,
+              name: f.name || (isForms ? 'SCHOOL FORMS' : isDocs ? 'SCHOOL DOCUMENTS' : 'Untitled Folder'),
+              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms.' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies.' : ''),
               driveUrl: f.driveUrl || '',
               driveId: extractDriveId(f.driveUrl || '') || f.driveId || '',
-              category: isForms ? 'DepEd Forms & Portfolio' : 'General Subject Materials',
-              color: isForms ? 'Blue' : 'Emerald',
-              isPermanent: true as const,
+              category: f.category || (isForms ? 'DepEd Forms & Portfolio' : isDocs ? 'General Subject Materials' : 'School Documents'),
+              color: f.color || (isForms ? 'Blue' : isDocs ? 'Emerald' : 'Indigo'),
+              isPermanent: isForms || isDocs ? true : Boolean(f.isPermanent),
+              createdAt: f.createdAt,
               updatedAt: f.updatedAt || new Date().toISOString(),
               updatedBy: f.updatedBy || 'School Administration',
+              createdBy: f.createdBy,
             };
           });
 
-          // Ensure both folders always exist
+          // Ensure both core default folders always exist
           const hasForms = loaded.some(f => f.id === 'school-forms');
           const hasDocs = loaded.some(f => f.id === 'school-documents');
           if (!hasForms) {
             loaded.unshift(INITIAL_SCHOOL_PERMANENT_FOLDERS[0]);
           }
           if (!hasDocs) {
-            loaded.push(INITIAL_SCHOOL_PERMANENT_FOLDERS[1]);
+            const formsIdx = loaded.findIndex(f => f.id === 'school-forms');
+            loaded.splice(formsIdx >= 0 ? formsIdx + 1 : 0, 0, INITIAL_SCHOOL_PERMANENT_FOLDERS[1]);
           }
 
           saveSchoolPermanentFoldersToLocalStorage(loaded);

@@ -57,16 +57,18 @@ export interface FacultyFolder {
 }
 
 export interface SchoolPermanentFolder {
-  id: 'school-forms' | 'school-documents';
-  name: 'SCHOOL FORMS' | 'SCHOOL DOCUMENTS';
+  id: string;
+  name: string;
   description: string;
   driveUrl: string;
   driveId?: string;
   category: string;
   color: string;
-  isPermanent: true;
+  isPermanent?: boolean;
+  createdAt?: string;
   updatedAt: string;
   updatedBy?: string;
+  createdBy?: string;
 }
 
 export interface FacultyPersonalFile {

@@ -758,7 +758,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 </div>
               </div>
               <div className="text-[11px] font-mono text-slate-500 hidden sm:block">
-                {filteredPermanentFolders.length} of 2 Folders
+                {filteredPermanentFolders.length} Central Folders
               </div>
             </div>
 
@@ -770,13 +770,41 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {filteredPermanentFolders.map((permFolder) => {
                   const isForms = permFolder.id === 'school-forms';
-                  const bgGradient = isForms
-                    ? 'from-blue-50/70 to-indigo-50/50 hover:border-blue-500'
-                    : 'from-emerald-50/70 to-teal-50/50 hover:border-emerald-500';
-                  const iconBg = isForms ? 'bg-blue-600' : 'bg-emerald-600';
-                  const badgeColor = isForms
-                    ? 'bg-blue-100 text-blue-800 border-blue-200'
-                    : 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                  const isDocs = permFolder.id === 'school-documents';
+
+                  let bgGradient = 'from-indigo-50/70 to-blue-50/50 hover:border-indigo-500';
+                  let iconBg = 'bg-indigo-600';
+                  let badgeColor = 'bg-indigo-100 text-indigo-800 border-indigo-200';
+
+                  if (isForms || permFolder.color === 'Blue') {
+                    bgGradient = 'from-blue-50/70 to-indigo-50/50 hover:border-blue-500';
+                    iconBg = 'bg-blue-600';
+                    badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                  } else if (isDocs || permFolder.color === 'Emerald') {
+                    bgGradient = 'from-emerald-50/70 to-teal-50/50 hover:border-emerald-500';
+                    iconBg = 'bg-emerald-600';
+                    badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                  } else if (permFolder.color === 'Purple') {
+                    bgGradient = 'from-purple-50/70 to-fuchsia-50/50 hover:border-purple-500';
+                    iconBg = 'bg-purple-600';
+                    badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                  } else if (permFolder.color === 'Amber') {
+                    bgGradient = 'from-amber-50/70 to-yellow-50/50 hover:border-amber-500';
+                    iconBg = 'bg-amber-600';
+                    badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                  } else if (permFolder.color === 'Rose') {
+                    bgGradient = 'from-rose-50/70 to-pink-50/50 hover:border-rose-500';
+                    iconBg = 'bg-rose-600';
+                    badgeColor = 'bg-rose-100 text-rose-800 border-rose-200';
+                  } else if (permFolder.color === 'Teal') {
+                    bgGradient = 'from-teal-50/70 to-emerald-50/50 hover:border-teal-500';
+                    iconBg = 'bg-teal-600';
+                    badgeColor = 'bg-teal-100 text-teal-800 border-teal-200';
+                  } else if (permFolder.color === 'Cyan') {
+                    bgGradient = 'from-cyan-50/70 to-blue-50/50 hover:border-cyan-500';
+                    iconBg = 'bg-cyan-600';
+                    badgeColor = 'bg-cyan-100 text-cyan-800 border-cyan-200';
+                  }
 
                   return (
                     <div
@@ -788,7 +816,13 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center space-x-3">
                             <div className={`p-3 rounded-2xl ${iconBg} text-white shadow-xs shrink-0`}>
-                              {isForms ? <FileSpreadsheet className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
+                              {isForms ? (
+                                <FileSpreadsheet className="w-6 h-6" />
+                              ) : isDocs ? (
+                                <FileText className="w-6 h-6" />
+                              ) : (
+                                <FolderLock className="w-6 h-6" />
+                              )}
                             </div>
                             <div>
                               <div className="flex items-center space-x-2">
@@ -797,7 +831,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                                 </span>
                                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-200/80 text-slate-700 flex items-center space-x-1">
                                   <Lock className="w-3 h-3 text-slate-600" />
-                                  <span>Permanent</span>
+                                  <span>{permFolder.isPermanent ? 'Permanent' : 'School Folder'}</span>
                                 </span>
                               </div>
                               <h3 className="font-extrabold text-base sm:text-lg text-slate-900 group-hover:text-blue-700 transition-colors mt-1 font-sans">
@@ -808,21 +842,21 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
                           <div
                             className="p-1.5 text-slate-400 bg-white/80 rounded-xl border border-slate-200 shadow-2xs"
-                            title="Permanent School Folder (Admin Managed Link)"
+                            title="School Central Folder (Admin/Coordinator Managed Link)"
                           >
                             <Lock className="w-4 h-4 text-slate-500" />
                           </div>
                         </div>
 
                         <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed font-sans">
-                          {permFolder.description}
+                          {permFolder.description || 'Central department repository folder.'}
                         </p>
                       </div>
 
                       <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs font-mono">
                         <span className="text-[10px] text-slate-500 flex items-center space-x-1 font-semibold">
                           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>Admin Configured Drive Link</span>
+                          <span>{permFolder.updatedBy ? `Set by ${permFolder.updatedBy}` : 'Central Drive Link'}</span>
                         </span>
 
                         <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-700 group-hover:translate-x-1 transition-transform">
