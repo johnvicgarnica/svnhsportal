@@ -238,6 +238,24 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "termId", "facultyEmail", "weeks"]
+    },
+    "schoolPermanentFolders": {
+      "title": "School Permanent Folders",
+      "description": "Permanent school-wide folders (SCHOOL FORMS and SCHOOL DOCUMENTS) configured by administrators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "driveUrl": { "type": "string" },
+        "driveId": { "type": "string" },
+        "category": { "type": "string" },
+        "color": { "type": "string" },
+        "isPermanent": { "type": "boolean" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "name", "driveUrl", "isPermanent"]
     }
   }
 }

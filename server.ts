@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
@@ -183,22 +184,70 @@ Your tone is professional, technical, clear, and helpful for developers, researc
 
 // Vite middleware for development vs static serve for production
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const distAssets = path.join(distPath, 'assets');
+  const hasSrc = fs.existsSync(path.join(process.cwd(), 'src/main.tsx'));
+
+  // Ensure dist artifacts exist for static serving
+  if (!fs.existsSync(distPath)) {
+    fs.mkdirSync(distPath, { recursive: true });
+  }
+  if (!fs.existsSync(distAssets)) {
+    fs.mkdirSync(distAssets, { recursive: true });
+  }
+  const rootHtml = path.join(process.cwd(), 'index.html');
+  const destHtml = path.join(distPath, 'index.html');
+  if (fs.existsSync(rootHtml)) {
+    fs.copyFileSync(rootHtml, destHtml);
+  }
+  const publicDir = path.join(process.cwd(), 'public');
+  if (fs.existsSync(publicDir)) {
+    fs.cpSync(publicDir, distPath, { recursive: true });
+  }
+  const srcImagesDir = path.join(process.cwd(), 'src/assets/images');
+  if (fs.existsSync(srcImagesDir)) {
+    fs.cpSync(srcImagesDir, distAssets, { recursive: true });
+  }
+
+  if (process.env.NODE_ENV !== 'production' && hasSrc) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // Disable all caching for static assets to ensure preview updates instantly
+    app.use((req, res, next) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
+      next();
+    });
+    app.use(express.static(distPath, {
+      maxAge: 0,
+      etag: false,
+      lastModified: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      }
+    }));
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: 0,
+      etag: false,
+      lastModified: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      }
+    }));
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[AetherData Datacenter Server] Running on http://0.0.0.0:${PORT}`);
+    console.log(`[SVNHS Repository Server] Running on http://0.0.0.0:${PORT}`);
   });
 }
 

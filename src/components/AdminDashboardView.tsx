@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Announcement,
   AnnouncementPriority,
@@ -8,8 +8,10 @@ import {
   DriveFolder,
   FacultyFolder,
   FacultyPersonalFile,
+  SchoolPermanentFolder,
 } from '../types';
 import { AdminFacultyFoldersDirectory } from './AdminFacultyFoldersDirectory';
+import { GoogleDriveWebview } from './GoogleDriveWebview';
 import {
   saveFacultyToFirestore,
   deleteFacultyFromFirestore,
@@ -28,6 +30,11 @@ import {
   subscribeUserPasswords,
   saveSettingToFirestore,
   subscribeSettings,
+  getStoredSchoolPermanentFolders,
+  subscribeSchoolPermanentFolders,
+  updateSchoolPermanentFolderInFirestore,
+  INITIAL_SCHOOL_PERMANENT_FOLDERS,
+  extractDriveId,
 } from '../lib/firebase';
 import {
   Megaphone,
@@ -58,6 +65,11 @@ import {
   Clock,
   CheckCircle,
   FolderGit2,
+  FolderLock,
+  Link,
+  RotateCcw,
+  FileSpreadsheet,
+  ExternalLink,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -66,6 +78,8 @@ interface AdminDashboardViewProps {
   driveFolders?: DriveFolder[];
   facultyFolders?: FacultyFolder[];
   facultyFiles?: FacultyPersonalFile[];
+  schoolPermanentFolders?: SchoolPermanentFolder[];
+  onUpdateSchoolPermanentFolder?: (id: 'school-forms' | 'school-documents', updates: { driveUrl?: string; description?: string; updatedBy?: string }) => void;
   onAddAnnouncement: (announcement: Omit<Announcement, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onEditAnnouncement: (id: string, updated: Partial<Announcement>) => void;
   onDeleteAnnouncement: (id: string) => void;
@@ -86,6 +100,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   driveFolders = [],
   facultyFolders = [],
   facultyFiles = [],
+  schoolPermanentFolders: propPermanentFolders,
+  onUpdateSchoolPermanentFolder,
   onAddAnnouncement,
   onEditAnnouncement,
   onDeleteAnnouncement,
@@ -101,10 +117,150 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', or 'announcements')
+  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', or 'school-folders')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
+
+  // School Permanent Folders State (SCHOOL FORMS & SCHOOL DOCUMENTS)
+  const [schoolFolders, setSchoolFolders] = useState<SchoolPermanentFolder[]>(() => {
+    return propPermanentFolders && propPermanentFolders.length > 0
+      ? propPermanentFolders
+      : getStoredSchoolPermanentFolders();
+  });
+
+  useEffect(() => {
+    if (propPermanentFolders && propPermanentFolders.length > 0) {
+      setSchoolFolders(propPermanentFolders);
+    }
+  }, [propPermanentFolders]);
+
+  useEffect(() => {
+    const unsub = subscribeSchoolPermanentFolders((list) => {
+      if (list && list.length > 0) {
+        setSchoolFolders(list);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const formsPermanentFolder = useMemo(() => {
+    return schoolFolders.find((f) => f.id === 'school-forms') || INITIAL_SCHOOL_PERMANENT_FOLDERS[0];
+  }, [schoolFolders]);
+
+  const docsPermanentFolder = useMemo(() => {
+    return schoolFolders.find((f) => f.id === 'school-documents') || INITIAL_SCHOOL_PERMANENT_FOLDERS[1];
+  }, [schoolFolders]);
+
+  const [formsUrlInput, setFormsUrlInput] = useState<string>(formsPermanentFolder.driveUrl || '');
+  const [formsDescInput, setFormsDescInput] = useState<string>(formsPermanentFolder.description || '');
+  const [isSavingForms, setIsSavingForms] = useState<boolean>(false);
+  const [showFormsPreview, setShowFormsPreview] = useState<boolean>(false);
+
+  const [docsUrlInput, setDocsUrlInput] = useState<string>(docsPermanentFolder.driveUrl || '');
+  const [docsDescInput, setDocsDescInput] = useState<string>(docsPermanentFolder.description || '');
+  const [isSavingDocs, setIsSavingDocs] = useState<boolean>(false);
+  const [showDocsPreview, setShowDocsPreview] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (formsPermanentFolder) {
+      setFormsUrlInput(formsPermanentFolder.driveUrl || '');
+      setFormsDescInput(formsPermanentFolder.description || '');
+    }
+  }, [formsPermanentFolder]);
+
+  useEffect(() => {
+    if (docsPermanentFolder) {
+      setDocsUrlInput(docsPermanentFolder.driveUrl || '');
+      setDocsDescInput(docsPermanentFolder.description || '');
+    }
+  }, [docsPermanentFolder]);
+
+  const handleSaveFormsLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingForms(true);
+    const driveId = extractDriveId(formsUrlInput.trim());
+    try {
+      if (onUpdateSchoolPermanentFolder) {
+        onUpdateSchoolPermanentFolder('school-forms', {
+          driveUrl: formsUrlInput.trim(),
+          description: formsDescInput.trim(),
+          updatedBy: currentUser.name || 'Admin',
+        });
+      } else {
+        await updateSchoolPermanentFolderInFirestore('school-forms', {
+          driveUrl: formsUrlInput.trim(),
+          description: formsDescInput.trim(),
+          driveId: driveId || '',
+          updatedBy: currentUser.name || 'Admin',
+        });
+      }
+      showToast('⚡ SCHOOL FORMS embedded Google Drive link saved! Visible immediately in all faculty workspaces.');
+    } catch {
+      showToast('⚠️ Error updating SCHOOL FORMS link. Please check network.');
+    } finally {
+      setIsSavingForms(false);
+    }
+  };
+
+  const handleSaveDocsLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingDocs(true);
+    const driveId = extractDriveId(docsUrlInput.trim());
+    try {
+      if (onUpdateSchoolPermanentFolder) {
+        onUpdateSchoolPermanentFolder('school-documents', {
+          driveUrl: docsUrlInput.trim(),
+          description: docsDescInput.trim(),
+          updatedBy: currentUser.name || 'Admin',
+        });
+      } else {
+        await updateSchoolPermanentFolderInFirestore('school-documents', {
+          driveUrl: docsUrlInput.trim(),
+          description: docsDescInput.trim(),
+          driveId: driveId || '',
+          updatedBy: currentUser.name || 'Admin',
+        });
+      }
+      showToast('⚡ SCHOOL DOCUMENTS embedded Google Drive link saved! Visible immediately in all faculty workspaces.');
+    } catch {
+      showToast('⚠️ Error updating SCHOOL DOCUMENTS link. Please check network.');
+    } finally {
+      setIsSavingDocs(false);
+    }
+  };
+
+  const handleResetFormsDefault = async () => {
+    if (window.confirm('Reset SCHOOL FORMS embedded link to official DepEd default?')) {
+      const defaultUrl = INITIAL_SCHOOL_PERMANENT_FOLDERS[0].driveUrl;
+      const defaultDesc = INITIAL_SCHOOL_PERMANENT_FOLDERS[0].description;
+      setFormsUrlInput(defaultUrl);
+      setFormsDescInput(defaultDesc);
+      await updateSchoolPermanentFolderInFirestore('school-forms', {
+        driveUrl: defaultUrl,
+        description: defaultDesc,
+        driveId: extractDriveId(defaultUrl) || '',
+        updatedBy: currentUser.name || 'Admin',
+      });
+      showToast('⚡ SCHOOL FORMS link reset to default.');
+    }
+  };
+
+  const handleResetDocsDefault = async () => {
+    if (window.confirm('Reset SCHOOL DOCUMENTS embedded link to official DepEd default?')) {
+      const defaultUrl = INITIAL_SCHOOL_PERMANENT_FOLDERS[1].driveUrl;
+      const defaultDesc = INITIAL_SCHOOL_PERMANENT_FOLDERS[1].description;
+      setDocsUrlInput(defaultUrl);
+      setDocsDescInput(defaultDesc);
+      await updateSchoolPermanentFolderInFirestore('school-documents', {
+        driveUrl: defaultUrl,
+        description: defaultDesc,
+        driveId: extractDriveId(defaultUrl) || '',
+        updatedBy: currentUser.name || 'Admin',
+      });
+      showToast('⚡ SCHOOL DOCUMENTS link reset to default.');
+    }
+  };
 
   // Master Faculty Password State
   const [masterPassword, setMasterPassword] = useState<string>('shs304868');
@@ -133,37 +289,26 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     userEmailClean === 'garjohn@deped.gov.ph' ||
     userEmailClean === 'johnvicgarnica1@gmail.com'
   );
+  const isCoordinator =
+    currentUser.designation === 'Coordinator' ||
+    (currentUser.designation?.toLowerCase().includes('coordinator') ?? false);
 
-  // Master Admin Password Verification & Unlock State (Restricting Accounts & Passwords to Master Admin)
-  const [isMasterAdminUnlocked, setIsMasterAdminUnlocked] = useState<boolean>(false);
-  const canAccessMasterAdmin = isMasterAdmin || isMasterAdminUnlocked;
-  const [isMasterAuthModalOpen, setIsMasterAuthModalOpen] = useState<boolean>(false);
-  const [masterAuthInput, setMasterAuthInput] = useState<string>('');
-  const [masterAuthError, setMasterAuthError] = useState<string | null>(null);
-  const [showMasterAuthInput, setShowMasterAuthInput] = useState<boolean>(false);
-
-  const handleUnlockMasterAdmin = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setMasterAuthError(null);
-    const expectedPassword = masterAdminPassword || 'garjohn@1995';
-    if (masterAuthInput.trim() === expectedPassword) {
-      setIsMasterAdminUnlocked(true);
-      setIsMasterAuthModalOpen(false);
-      setMasterAuthInput('');
-      setAdminSubTab('passwords');
-      showToast('Master Admin verified: Faculty & Admin Accounts & Passwords unlocked.');
-    } else {
-      setMasterAuthError('Incorrect Master Admin password. Access denied.');
-    }
-  };
-
-  const handleLockMasterAdmin = () => {
-    setIsMasterAdminUnlocked(false);
+  // Restrict Accounts & Passwords tab strictly to Master Admin, and restrict Faculty Folders from Coordinator
+  useEffect(() => {
     if (!isMasterAdmin && adminSubTab === 'passwords') {
       setAdminSubTab('announcements');
     }
-    showToast('Master Admin session locked.');
-  };
+    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders')) {
+      setAdminSubTab('announcements');
+    }
+  }, [isMasterAdmin, isCoordinator, adminSubTab]);
+
+  // Modal for adding a new admin account
+  const [isAddAdminOpen, setIsAddAdminOpen] = useState<boolean>(false);
+  const [newAdminName, setNewAdminName] = useState<string>('');
+  const [newAdminEmail, setNewAdminEmail] = useState<string>('');
+  const [newAdminDesignation, setNewAdminDesignation] = useState<'School Principal' | 'Master Teacher' | 'Coordinator'>('School Principal');
+  const [newAdminPass, setNewAdminPass] = useState<string>('');
 
   // Custom Faculty Account Passwords Map
   const [customFacultyPasswords, setCustomFacultyPasswords] = useState<Record<string, string>>({});
@@ -212,7 +357,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       id: 'admin-master',
       name: 'John Vic Garnica (Admin)',
       email: 'johnvic.garnica@deped.gov.ph',
-      designation: 'School Administrator (Master Admin)',
+      designation: 'Web Developer',
+    },
+    {
+      id: 'admin-marivic',
+      name: 'Marivic R. Villaluz',
+      email: 'marivic.villaluz@deped.gov.ph',
+      designation: 'School Principal',
+    },
+    {
+      id: 'admin-norma',
+      name: 'Norma Jabagat',
+      email: 'norma.jabagat@deped.gov.ph',
+      designation: 'Master Teacher',
     },
   ]);
 
@@ -402,6 +559,57 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
       showToast(`⚡ Admin account "${name}" (${cleanEmail}) has been deleted.`);
     }
+  };
+
+  // Handler: Update Admin Designation / Title
+  const handleUpdateAdminDesignation = (id: string, designation: string) => {
+    if (!isMasterAdmin) {
+      alert('Security Restriction: Only the Master Admin can update admin titles.');
+      return;
+    }
+    const updated = adminList.map((a) => (a.id === id ? { ...a, designation } : a));
+    setAdminList(updated);
+    saveAdminsToFirestore(updated);
+    showToast(`⚡ Updated admin title to "${designation}" in real time!`);
+  };
+
+  // Handler: Add New Administrator Directly
+  const handleAddAdmin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isMasterAdmin) {
+      alert('Security Restriction: Only the Master Admin can register administrators.');
+      return;
+    }
+    if (!newAdminName.trim() || !newAdminEmail.trim()) return;
+
+    let cleanEmail = newAdminEmail.trim().toLowerCase();
+    if (!cleanEmail.endsWith('@deped.gov.ph')) {
+      cleanEmail += '@deped.gov.ph';
+    }
+
+    const newAdmin = {
+      id: `admin-${Date.now()}`,
+      name: newAdminName.trim(),
+      email: cleanEmail,
+      designation: newAdminDesignation,
+    };
+
+    const updatedDir = [...adminList, newAdmin];
+    setAdminList(updatedDir);
+    saveAdminsToFirestore(updatedDir);
+
+    if (newAdminPass.trim()) {
+      const updatedMap = { ...adminPasswords, [cleanEmail]: newAdminPass.trim() };
+      setAdminPasswords(updatedMap);
+      saveUserPasswordToFirestore(cleanEmail, newAdminPass.trim(), 'Admin');
+    }
+
+    setIsAddAdminOpen(false);
+    setNewAdminName('');
+    setNewAdminEmail('');
+    setNewAdminDesignation('School Principal');
+    setNewAdminPass('');
+    showToast(`⚡ Administrator "${newAdmin.name}" (${cleanEmail}) [${newAdminDesignation}] registered in real time!`);
   };
 
   // Handler: Update Master Admin Credentials
@@ -792,19 +1000,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <span className="text-slate-600 font-bold">Logged in as:</span>
           <span className="text-slate-900 font-bold truncate max-w-[180px]">{currentUser.name}</span>
-          {isMasterAdmin && (
-            <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase ml-1">
-              Master Admin
-            </span>
-          )}
+          <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase ml-1">
+            {currentUser.designation || (isMasterAdmin ? 'Web Developer' : 'Admin')}
+          </span>
         </div>
       </div>
 
       {/* Admin Sub-Navigation Tabs */}
       <div className="bg-slate-100 p-2 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-sm">
         <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
-          {/* Faculty & Admin Accounts & Passwords Tab: ONLY VISIBLE TO MASTER ADMIN */}
-          {canAccessMasterAdmin ? (
+          {/* Faculty & Admin Accounts & Passwords Tab: STRICTLY VISIBLE ONLY TO MASTER ADMIN */}
+          {isMasterAdmin && !isCoordinator && (
             <div className="flex items-center space-x-1 flex-1 sm:flex-none">
               <button
                 type="button"
@@ -823,35 +1029,11 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   </span>
                 ) : (
                   <span className="bg-emerald-900/60 text-emerald-100 border border-emerald-400/40 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ml-1">
-                    Master Admin
+                    Master Admin Only
                   </span>
                 )}
               </button>
-              {isMasterAdminUnlocked && !isMasterAdmin && (
-                <button
-                  type="button"
-                  onClick={handleLockMasterAdmin}
-                  className="px-2.5 py-2.5 rounded-xl bg-slate-200 hover:bg-rose-100 text-slate-700 hover:text-rose-700 transition-all cursor-pointer border border-slate-300 text-xs font-mono font-bold"
-                  title="Lock Master Admin session"
-                >
-                  <Lock className="w-4 h-4" />
-                </button>
-              )}
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setMasterAuthError(null);
-                setMasterAuthInput('');
-                setIsMasterAuthModalOpen(true);
-              }}
-              className="flex-1 sm:flex-none px-3.5 py-2.5 rounded-xl font-mono text-xs font-bold text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/70 transition-all cursor-pointer border border-dashed border-slate-300 hover:border-emerald-400 bg-white/70 flex items-center justify-center space-x-2"
-              title="Protected: Enter Master Admin Password to view Faculty & Admin Accounts & Passwords"
-            >
-              <Lock className="w-3.5 h-3.5 text-slate-500" />
-              <span>Master Admin Access</span>
-            </button>
           )}
 
           <button
@@ -867,17 +1049,32 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <span>Department Bulletins ({announcements.length})</span>
           </button>
 
+          {!isCoordinator && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('faculty-folders')}
+              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+                adminSubTab === 'faculty-folders'
+                  ? 'bg-amber-700 text-white shadow-md ring-2 ring-amber-400 ring-offset-1 border border-amber-600 scale-[1.02]'
+                  : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 hover:shadow-xs'
+              }`}
+            >
+              <FolderGit2 className="w-4 h-4 text-amber-200" />
+              <span>Faculty Folders ({facultyFolders.length})</span>
+            </button>
+          )}
+
           <button
             type="button"
-            onClick={() => setAdminSubTab('faculty-folders')}
+            onClick={() => setAdminSubTab('school-folders')}
             className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
-              adminSubTab === 'faculty-folders'
-                ? 'bg-amber-700 text-white shadow-md ring-2 ring-amber-400 ring-offset-1 border border-amber-600 scale-[1.02]'
-                : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 hover:shadow-xs'
+              adminSubTab === 'school-folders'
+                ? 'bg-indigo-700 text-white shadow-md ring-2 ring-indigo-400 ring-offset-1 border border-indigo-600 scale-[1.02]'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500 hover:shadow-xs'
             }`}
           >
-            <FolderGit2 className="w-4 h-4 text-amber-200" />
-            <span>Faculty Folders ({facultyFolders.length})</span>
+            <FolderLock className="w-4 h-4 text-indigo-200" />
+            <span>School Forms & Documents (2)</span>
           </button>
         </div>
 
@@ -888,7 +1085,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       </div>
 
       {/* SUB-TAB 1: FACULTY & ADMIN REAL-TIME PASSWORD CONTROL & ACCOUNTS (RESTRICTED TO MASTER ADMIN) */}
-      {adminSubTab === 'passwords' && canAccessMasterAdmin && (
+      {adminSubTab === 'passwords' && isMasterAdmin && (
         <div className="space-y-6">
 
           {/* Pending Faculty Account Registration Requests */}
@@ -1621,8 +1818,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 </p>
               </div>
 
-              <div className="text-xs font-mono text-slate-500">
-                Total Active Admins: <span className="text-slate-900 font-bold">{adminList.length}</span>
+              <div className="flex items-center space-x-3">
+                <div className="text-xs font-mono text-slate-500">
+                  Total Active Admins: <span className="text-slate-900 font-bold">{adminList.length}</span>
+                </div>
+                {isMasterAdmin && (
+                  <button
+                    onClick={() => setIsAddAdminOpen(true)}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-mono font-bold text-xs rounded-xl shadow-2xs transition-all flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5 text-white" />
+                    <span>Add Administrator</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1632,7 +1840,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   <tr>
                     <th className="p-3">Admin Name</th>
                     <th className="p-3">Email Address</th>
-                    <th className="p-3">Designation / Role</th>
+                    <th className="p-3">Admin Title / Designation</th>
                     <th className="p-3">Active Password</th>
                     <th className="p-3 text-right">Actions</th>
                   </tr>
@@ -1655,7 +1863,26 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
                         <td className="p-3 text-slate-700">{admin.email}</td>
 
-                        <td className="p-3 text-slate-600 text-[11px]">{admin.designation}</td>
+                        <td className="p-3">
+                          {isMaster ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+                              Web Developer
+                            </span>
+                          ) : isMasterAdmin ? (
+                            <select
+                              value={admin.designation || 'School Principal'}
+                              onChange={(e) => handleUpdateAdminDesignation(admin.id, e.target.value)}
+                              className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 cursor-pointer focus:outline-none focus:border-amber-500"
+                              title="Update Administrator Title"
+                            >
+                              <option value="School Principal">School Principal</option>
+                              <option value="Master Teacher">Master Teacher</option>
+                              <option value="Coordinator">Coordinator</option>
+                            </select>
+                          ) : (
+                            <span className="text-slate-700 font-medium text-[11px]">{admin.designation}</span>
+                          )}
+                        </td>
 
                         <td className="p-3 font-mono font-bold">
                           <span className="text-slate-600 font-medium text-[11px] flex items-center space-x-1.5" title="All admin passwords are encrypted and hidden for privacy">
@@ -2295,79 +2522,104 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       )}
 
-      {/* MASTER ADMIN PASSWORD UNLOCK MODAL */}
-      {isMasterAuthModalOpen && (
+      {/* ADD NEW ADMINISTRATOR MODAL */}
+      {isAddAdminOpen && isMasterAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
-            <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white p-5 flex items-center justify-between">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden animate-fadeIn">
+            <div className="bg-gradient-to-r from-amber-600 via-amber-700 to-amber-800 text-white p-5 flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-emerald-500/20 text-emerald-300 rounded-2xl border border-emerald-400/30">
-                  <ShieldCheck className="w-5 h-5 text-emerald-300" />
+                <div className="p-2.5 bg-white/20 text-white rounded-2xl border border-white/30">
+                  <UserPlus className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold font-sans">Master Admin Authentication</h3>
-                  <p className="text-[11px] text-emerald-200/80 font-mono">Restricted Access Control</p>
+                  <h3 className="text-base font-bold font-sans">Register New Administrator</h3>
+                  <p className="text-[11px] text-amber-100 font-mono">Master Admin Direct Registration</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  setIsMasterAuthModalOpen(false);
-                  setMasterAuthInput('');
-                  setMasterAuthError(null);
+                  setIsAddAdminOpen(false);
+                  setNewAdminName('');
+                  setNewAdminEmail('');
+                  setNewAdminDesignation('School Principal');
+                  setNewAdminPass('');
                 }}
-                className="p-1.5 hover:bg-white/10 rounded-xl text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="p-1.5 hover:bg-white/10 rounded-xl text-white/80 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleUnlockMasterAdmin} className="p-6 space-y-4">
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-mono text-amber-800 space-y-1">
-                <div className="font-bold flex items-center space-x-1.5">
-                  <Lock className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Confidential Management Zone</span>
-                </div>
-                <p className="text-[11px] text-amber-700">
-                  The Faculty & Admin Accounts & Passwords page is strictly reserved for the Master Admin. Please enter the Master Admin Password to proceed.
+            <form onSubmit={handleAddAdmin} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-mono font-bold text-slate-700 uppercase mb-1.5">
+                  Admin Full Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newAdminName}
+                  onChange={(e) => setNewAdminName(e.target.value)}
+                  placeholder="e.g., Marivic Villaluz"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono font-bold text-slate-700 uppercase mb-1.5">
+                  DepEd Email Address <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={newAdminEmail}
+                  onChange={(e) => setNewAdminEmail(e.target.value)}
+                  placeholder="e.g., marivic.villaluz@deped.gov.ph"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono font-bold text-slate-700 uppercase mb-1.5">
+                  Admin Title / Designation <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newAdminDesignation}
+                  onChange={(e) => setNewAdminDesignation(e.target.value as 'School Principal' | 'Master Teacher' | 'Coordinator')}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                >
+                  <option value="School Principal">School Principal</option>
+                  <option value="Master Teacher">Master Teacher</option>
+                  <option value="Coordinator">Coordinator</option>
+                </select>
+                <p className="text-[11px] text-slate-500 font-mono mt-1">
+                  Designated DepEd Administrative role for this user account.
                 </p>
               </div>
 
               <div>
                 <label className="block text-xs font-mono font-bold text-slate-700 uppercase mb-1.5">
-                  Master Admin Password
+                  Administrator Password <span className="text-slate-400 font-normal">(Optional, defaults to Master Password)</span>
                 </label>
-                <div className="relative">
-                  <input
-                    type={showMasterAuthInput ? 'text' : 'password'}
-                    value={masterAuthInput}
-                    onChange={(e) => setMasterAuthInput(e.target.value)}
-                    placeholder="Enter Master Admin Password"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-hidden pr-10"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowMasterAuthInput(!showMasterAuthInput)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    {showMasterAuthInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                {masterAuthError && (
-                  <p className="text-xs font-mono text-rose-600 font-bold mt-1.5 flex items-center space-x-1">
-                    <span>⚠️ {masterAuthError}</span>
-                  </p>
-                )}
+                <input
+                  type="password"
+                  value={newAdminPass}
+                  onChange={(e) => setNewAdminPass(e.target.value)}
+                  placeholder="Enter initial password or leave blank for default"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                />
               </div>
 
               <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => {
-                    setIsMasterAuthModalOpen(false);
-                    setMasterAuthInput('');
-                    setMasterAuthError(null);
+                    setIsAddAdminOpen(false);
+                    setNewAdminName('');
+                    setNewAdminEmail('');
+                    setNewAdminDesignation('School Principal');
+                    setNewAdminPass('');
                   }}
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono font-bold text-xs rounded-xl cursor-pointer"
                 >
@@ -2375,10 +2627,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-mono font-bold text-xs rounded-xl cursor-pointer shadow-2xs flex items-center space-x-1.5"
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-mono font-bold text-xs rounded-xl cursor-pointer shadow-2xs flex items-center space-x-1.5"
                 >
-                  <Key className="w-4 h-4 text-emerald-200" />
-                  <span>Verify & Unlock</span>
+                  <UserPlus className="w-4 h-4 text-white" />
+                  <span>Register Administrator</span>
                 </button>
               </div>
             </form>
@@ -2387,7 +2639,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       )}
 
       {/* SUB-TAB: FACULTY WORKSPACE FOLDERS (GROUPED BY SURNAME) */}
-      {adminSubTab === 'faculty-folders' && (
+      {adminSubTab === 'faculty-folders' && !isCoordinator && (
         <AdminFacultyFoldersDirectory
           facultyList={facultyList}
           facultyFolders={facultyFolders}
@@ -2396,6 +2648,374 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           onDeleteFacultyFolder={onDeleteFacultyFolder}
           onDeleteFacultyFile={onDeleteFacultyFile}
         />
+      )}
+
+      {/* SUB-TAB: SCHOOL PERMANENT FOLDERS (SCHOOL FORMS & SCHOOL DOCUMENTS) */}
+      {adminSubTab === 'school-folders' && (
+        <div className="space-y-6">
+          {/* Main Info Banner */}
+          <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-lg relative overflow-hidden">
+            <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <span className="bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase flex items-center space-x-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-300" />
+                    <span>School Administration Central Links</span>
+                  </span>
+                  <span className="bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Real-time Global Sync</span>
+                  </span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-bold font-sans tracking-tight">
+                  Permanent School Folders Management
+                </h2>
+                <p className="text-xs sm:text-sm text-indigo-100/90 max-w-2xl leading-relaxed">
+                  Configure the official Google Drive folders for <strong className="text-white">"SCHOOL FORMS"</strong> and <strong className="text-white">"SCHOOL DOCUMENTS"</strong>.
+                  These two folders appear permanently in every faculty member's <strong className="text-white">"My Workspace"</strong> page. Only authorized administrators can set or update the embedded Google Drive links.
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/15 text-xs font-mono text-indigo-100 space-y-1.5 shrink-0">
+                <div className="text-[11px] text-indigo-300 font-bold uppercase">Folder Targets</div>
+                <div className="flex items-center space-x-2 font-bold text-white">
+                  <FolderLock className="w-4 h-4 text-emerald-300" />
+                  <span>2 Permanent Folders</span>
+                </div>
+                <div className="text-[10px] text-indigo-200">
+                  Shared across {facultyList.length} Faculty Members
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* TWO PERMANENT FOLDER EDITORS */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* 1. SCHOOL FORMS */}
+            <div className="bg-white border-2 border-slate-200 hover:border-blue-400/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-3 bg-blue-600 text-white rounded-2xl shadow-xs shrink-0">
+                    <FileSpreadsheet className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="bg-blue-100 text-blue-800 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-blue-200 uppercase">
+                        Permanent System Folder
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500 font-semibold flex items-center space-x-1">
+                        <Lock className="w-3 h-3 text-slate-400" />
+                        <span>All Faculty Workspaces</span>
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-900 mt-1">
+                      SCHOOL FORMS
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-bold">
+                    Active
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveFormsLink} className="space-y-4 text-xs font-mono">
+                <div>
+                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center space-x-1.5">
+                      <Link className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Embedded Google Drive Link *</span>
+                    </span>
+                    {extractDriveId(formsUrlInput) ? (
+                      <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                        Drive ID: {extractDriveId(formsUrlInput)?.substring(0, 14)}...
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-amber-600">Standard Google Drive folder URL</span>
+                    )}
+                  </label>
+                  <input
+                    type="url"
+                    value={formsUrlInput}
+                    onChange={(e) => setFormsUrlInput(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white font-mono transition-all"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Paste the shared Google Drive folder link containing DepEd SF1-SF10, Clearance, Inventory, and official School Forms.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                    Folder Description & Instructions for Faculty
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={formsDescInput}
+                    onChange={(e) => setFormsDescInput(e.target.value)}
+                    placeholder="Provide notes or guidelines for faculty regarding school forms..."
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white font-mono transition-all resize-none"
+                  />
+                </div>
+
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowFormsPreview(!showFormsPreview)}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-slate-600" />
+                      <span>{showFormsPreview ? 'Hide Preview' : 'Preview Webview'}</span>
+                    </button>
+
+                    {formsPermanentFolder.driveUrl && (
+                      <a
+                        href={formsPermanentFolder.driveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        title="Open in new browser tab"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open Drive</span>
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleResetFormsDefault}
+                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                      title="Reset to default official link"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={isSavingForms}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                    >
+                      {isSavingForms ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Save Link for All</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Embedded Webview Preview */}
+              {showFormsPreview && (
+                <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                    <span className="font-bold flex items-center space-x-1.5">
+                      <FolderLock className="w-4 h-4 text-blue-600" />
+                      <span>Live Drive Webview (SCHOOL FORMS)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowFormsPreview(false)}
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <GoogleDriveWebview
+                    driveUrl={formsUrlInput || formsPermanentFolder.driveUrl || ''}
+                    title="SCHOOL FORMS Preview"
+                    height="400px"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 2. SCHOOL DOCUMENTS */}
+            <div className="bg-white border-2 border-slate-200 hover:border-emerald-400/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-xs shrink-0">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-emerald-200 uppercase">
+                        Permanent System Folder
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500 font-semibold flex items-center space-x-1">
+                        <Lock className="w-3 h-3 text-slate-400" />
+                        <span>All Faculty Workspaces</span>
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-900 mt-1">
+                      SCHOOL DOCUMENTS
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-bold">
+                    Active
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveDocsLink} className="space-y-4 text-xs font-mono">
+                <div>
+                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center space-x-1.5">
+                      <Link className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Embedded Google Drive Link *</span>
+                    </span>
+                    {extractDriveId(docsUrlInput) ? (
+                      <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                        Drive ID: {extractDriveId(docsUrlInput)?.substring(0, 14)}...
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-amber-600">Standard Google Drive folder URL</span>
+                    )}
+                  </label>
+                  <input
+                    type="url"
+                    value={docsUrlInput}
+                    onChange={(e) => setDocsUrlInput(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono transition-all"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Paste the shared Google Drive folder link containing School Memos, DepEd Orders, Division Advisories, and Institutional Policies.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                    Folder Description & Instructions for Faculty
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={docsDescInput}
+                    onChange={(e) => setDocsDescInput(e.target.value)}
+                    placeholder="Provide notes or guidelines for faculty regarding school documents..."
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono transition-all resize-none"
+                  />
+                </div>
+
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowDocsPreview(!showDocsPreview)}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-slate-600" />
+                      <span>{showDocsPreview ? 'Hide Preview' : 'Preview Webview'}</span>
+                    </button>
+
+                    {docsPermanentFolder.driveUrl && (
+                      <a
+                        href={docsPermanentFolder.driveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        title="Open in new browser tab"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open Drive</span>
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleResetDocsDefault}
+                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                      title="Reset to default official link"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={isSavingDocs}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                    >
+                      {isSavingDocs ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Save Link for All</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Embedded Webview Preview */}
+              {showDocsPreview && (
+                <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                    <span className="font-bold flex items-center space-x-1.5">
+                      <FolderLock className="w-4 h-4 text-emerald-600" />
+                      <span>Live Drive Webview (SCHOOL DOCUMENTS)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowDocsPreview(false)}
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <GoogleDriveWebview
+                    driveUrl={docsUrlInput || docsPermanentFolder.driveUrl || ''}
+                    title="SCHOOL DOCUMENTS Preview"
+                    height="400px"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Explanatory Guide Card */}
+          <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-xs font-mono text-slate-600 space-y-3">
+            <div className="flex items-center space-x-2 text-slate-900 font-bold">
+              <ShieldCheck className="w-4 h-4 text-blue-600" />
+              <span className="uppercase tracking-wider">Administrator Instructions & Permission Guide</span>
+            </div>
+            <ul className="list-disc pl-5 space-y-1.5 text-slate-600 leading-relaxed">
+              <li>
+                <strong>Visibility:</strong> Both folders are permanently anchored at the top of the <strong className="text-slate-800">"My Workspace"</strong> view for every registered faculty member. Teachers cannot delete or rename them.
+              </li>
+              <li>
+                <strong>Central Link Management:</strong> Only administrators accessing this dashboard can update the embedded Google Drive URLs. Once saved, the new link immediately updates across all teacher workspaces.
+              </li>
+              <li>
+                <strong>Drive Permissions:</strong> To ensure all faculty members can view and download files without access requests, set the Google Drive folder share permissions to <strong className="text-slate-800">"Department of Education (DepEd)"</strong> or <strong className="text-slate-800">"Anyone with the link can view"</strong>.
+              </li>
+            </ul>
+          </div>
+        </div>
       )}
     </div>
   );

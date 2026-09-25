@@ -11,8 +11,9 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile } from '../types';
-import { INITIAL_DRIVE_FOLDERS } from '../mockData';
+import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder } from '../types';
+import { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
+export { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
@@ -162,7 +163,53 @@ export const deleteAdminFromFirestore = async (email: string) => {
 
 export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
   return onSnapshot(collection(db, ADMINS_COL), (snapshot) => {
-    const list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
+    let list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
+
+    // Ensure required designations for current admins and master admin
+    list = list.map((a) => {
+      const emailLower = (a.email || '').toLowerCase();
+      if (emailLower.includes('johnvic') || a.id === 'admin-master') {
+        return { ...a, designation: 'Web Developer' };
+      }
+      if (emailLower.includes('marivic') || emailLower.includes('villaluz') || a.id === 'admin-marivic') {
+        return { ...a, designation: 'School Principal' };
+      }
+      if (emailLower.includes('norma') || emailLower.includes('jabagat') || a.id === 'admin-norma') {
+        return { ...a, designation: 'Master Teacher' };
+      }
+      if (emailLower.includes('coordinator') || a.id === 'admin-coordinator' || a.designation === 'Coordinator') {
+        return { ...a, designation: 'Coordinator' };
+      }
+      return a;
+    });
+
+    if (!list.some((a) => (a.email || '').toLowerCase().includes('marivic') || a.id === 'admin-marivic')) {
+      list.push({
+        id: 'admin-marivic',
+        name: 'Marivic R. Villaluz',
+        email: 'marivic.villaluz@deped.gov.ph',
+        designation: 'School Principal',
+      });
+    }
+
+    if (!list.some((a) => (a.email || '').toLowerCase().includes('norma') || a.id === 'admin-norma')) {
+      list.push({
+        id: 'admin-norma',
+        name: 'Norma Jabagat',
+        email: 'norma.jabagat@deped.gov.ph',
+        designation: 'Master Teacher',
+      });
+    }
+
+    if (!list.some((a) => (a.email || '').toLowerCase().includes('coordinator') || a.id === 'admin-coordinator')) {
+      list.push({
+        id: 'admin-coordinator',
+        name: 'SHS Department Coordinator',
+        email: 'coordinator@deped.gov.ph',
+        designation: 'Coordinator',
+      });
+    }
+
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to admins collection:', err);
@@ -594,6 +641,8 @@ export const seedInitialAdminIfEmpty = async () => {
     await seedInitialAnnouncementsIfEmpty();
     // Seed default drive folders if not already seeded
     await seedInitialDriveFoldersIfEmpty();
+    // Seed default school permanent folders if not already seeded
+    await seedInitialSchoolPermanentFoldersIfEmpty();
 
     // Seed master admin email into Firebase settings if not already present
     const adminEmailSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_email'));
@@ -613,11 +662,47 @@ export const seedInitialAdminIfEmpty = async () => {
       id: 'admin-master',
       name: 'John Vic Garnica (Admin)',
       email: masterAdminEmail,
-      designation: 'School Administrator (Master Admin)',
+      designation: 'Web Developer',
       createdAt: new Date().toISOString(),
     };
 
     await setDoc(doc(db, ADMINS_COL, masterAdminDocId), masterAdminObj, { merge: true });
+
+    // Seed/Update Admin Marivic Villaluz as School Principal
+    const marivicEmail = 'marivic.villaluz@deped.gov.ph';
+    const marivicDocId = emailToDocId(marivicEmail);
+    const marivicObj = {
+      id: 'admin-marivic',
+      name: 'Marivic R. Villaluz',
+      email: marivicEmail,
+      designation: 'School Principal',
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, ADMINS_COL, marivicDocId), marivicObj, { merge: true });
+
+    // Seed/Update Admin Norma Jabagat as Master Teacher
+    const normaEmail = 'norma.jabagat@deped.gov.ph';
+    const normaDocId = emailToDocId(normaEmail);
+    const normaObj = {
+      id: 'admin-norma',
+      name: 'Norma Jabagat',
+      email: normaEmail,
+      designation: 'Master Teacher',
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, ADMINS_COL, normaDocId), normaObj, { merge: true });
+
+    // Seed/Update Admin Coordinator
+    const coordinatorEmail = 'coordinator@deped.gov.ph';
+    const coordinatorDocId = emailToDocId(coordinatorEmail);
+    const coordinatorObj = {
+      id: 'admin-coordinator',
+      name: 'SHS Department Coordinator',
+      email: coordinatorEmail,
+      designation: 'Coordinator',
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, ADMINS_COL, coordinatorDocId), coordinatorObj, { merge: true });
 
     // Seed master admin password into Firebase settings if not already present
     const adminPassSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_password'));
@@ -848,7 +933,7 @@ export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) =
 
 // 10. FACULTY WEEKLY SUBMISSION REPORTS (DLL, TOS, TQ - 11 WEEKS PER TERM)
 export type SubmissionCategory = 'dll' | 'tos' | 'tq';
-export type ItemSubmissionStatus = 'unchecked' | 'checked' | 'with-comments' | 'incomplete';
+export type ItemSubmissionStatus = 'unchecked' | 'checked' | 'with-comments' | 'incomplete' | 'late';
 
 export const getCategoryCollectionName = (category: SubmissionCategory = 'dll') => {
   if (category === 'tos') return 'facultySubmissions_tos';
@@ -1574,6 +1659,137 @@ export const subscribeActiveTermId = (onUpdate: (termId: string) => void) => {
     }
   );
 };
+
+// 15. SCHOOL PERMANENT WORKSPACE FOLDERS ("SCHOOL FORMS" and "SCHOOL DOCUMENTS")
+export const SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY = 'svnhs_school_permanent_folders';
+export const SCHOOL_PERMANENT_FOLDERS_DOC_ID = 'school_permanent_folders';
+
+export const getStoredSchoolPermanentFolders = (): SchoolPermanentFolder[] => {
+  try {
+    const raw = localStorage.getItem(SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading school permanent folders from localStorage:', e);
+  }
+  return INITIAL_SCHOOL_PERMANENT_FOLDERS;
+};
+
+export const saveSchoolPermanentFoldersToLocalStorage = (folders: SchoolPermanentFolder[]) => {
+  try {
+    localStorage.setItem(SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+  } catch (e) {
+    console.error('Error saving school permanent folders to localStorage:', e);
+  }
+};
+
+export const saveSchoolPermanentFoldersToFirestore = async (folders: SchoolPermanentFolder[]) => {
+  try {
+    saveSchoolPermanentFoldersToLocalStorage(folders);
+    await setDoc(
+      doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID),
+      {
+        id: SCHOOL_PERMANENT_FOLDERS_DOC_ID,
+        folders: folders,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving school permanent folders to Firestore:', err);
+  }
+};
+
+export const updateSchoolPermanentFolderInFirestore = async (
+  id: 'school-forms' | 'school-documents',
+  updates: { driveUrl?: string; description?: string; driveId?: string; updatedBy?: string }
+) => {
+  try {
+    const current = getStoredSchoolPermanentFolders();
+    const updatedList = current.map((f) => {
+      if (f.id === id) {
+        const driveUrl = updates.driveUrl !== undefined ? updates.driveUrl : f.driveUrl;
+        return {
+          ...f,
+          ...updates,
+          driveUrl,
+          driveId: extractDriveId(driveUrl) || f.driveId || '',
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return f;
+    });
+
+    await saveSchoolPermanentFoldersToFirestore(updatedList);
+  } catch (err) {
+    console.error('Error updating school permanent folder in Firestore:', err);
+  }
+};
+
+export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPermanentFolder[]) => void) => {
+  return onSnapshot(
+    doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (Array.isArray(data.folders) && data.folders.length > 0) {
+          const loaded: SchoolPermanentFolder[] = data.folders.map((f: Partial<SchoolPermanentFolder>) => {
+            const isForms = f.id === 'school-forms';
+            return {
+              id: isForms ? 'school-forms' : 'school-documents',
+              name: isForms ? 'SCHOOL FORMS' : 'SCHOOL DOCUMENTS',
+              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms.' : 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies.'),
+              driveUrl: f.driveUrl || '',
+              driveId: extractDriveId(f.driveUrl || '') || f.driveId || '',
+              category: isForms ? 'DepEd Forms & Portfolio' : 'General Subject Materials',
+              color: isForms ? 'Blue' : 'Emerald',
+              isPermanent: true as const,
+              updatedAt: f.updatedAt || new Date().toISOString(),
+              updatedBy: f.updatedBy || 'School Administration',
+            };
+          });
+
+          // Ensure both folders always exist
+          const hasForms = loaded.some(f => f.id === 'school-forms');
+          const hasDocs = loaded.some(f => f.id === 'school-documents');
+          if (!hasForms) {
+            loaded.unshift(INITIAL_SCHOOL_PERMANENT_FOLDERS[0]);
+          }
+          if (!hasDocs) {
+            loaded.push(INITIAL_SCHOOL_PERMANENT_FOLDERS[1]);
+          }
+
+          saveSchoolPermanentFoldersToLocalStorage(loaded);
+          onUpdate(loaded);
+          return;
+        }
+      }
+      const cached = getStoredSchoolPermanentFolders();
+      onUpdate(cached);
+    },
+    (err) => {
+      console.error('Error subscribing to school permanent folders:', err);
+      const cached = getStoredSchoolPermanentFolders();
+      onUpdate(cached);
+    }
+  );
+};
+
+export const seedInitialSchoolPermanentFoldersIfEmpty = async () => {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID));
+    if (!snap.exists()) {
+      await saveSchoolPermanentFoldersToFirestore(INITIAL_SCHOOL_PERMANENT_FOLDERS);
+    }
+  } catch (err) {
+    console.error('Error seeding initial school permanent folders:', err);
+  }
+};
+
 
 
 

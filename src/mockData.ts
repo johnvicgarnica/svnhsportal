@@ -1,6 +1,33 @@
-import { RepositoryCollection, RepositoryItem, StorageTelemetry, ApiAccessKey, Announcement, DriveFolder } from './types';
+import { RepositoryCollection, RepositoryItem, StorageTelemetry, ApiAccessKey, Announcement, DriveFolder, SchoolPermanentFolder } from './types';
 
 export const INITIAL_ANNOUNCEMENTS: Announcement[] = [];
+
+export const INITIAL_SCHOOL_PERMANENT_FOLDERS: SchoolPermanentFolder[] = [
+  {
+    id: 'school-forms',
+    name: 'SCHOOL FORMS',
+    description: 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms.',
+    driveUrl: 'https://drive.google.com/drive/folders/1EAcyg-_LRsaZ6i_yu4pvDbBdoqPst6Lt?usp=drive_link',
+    driveId: '1EAcyg-_LRsaZ6i_yu4pvDbBdoqPst6Lt',
+    category: 'DepEd Forms & Portfolio',
+    color: 'Blue',
+    isPermanent: true,
+    updatedAt: '2026-03-01T00:00:00.000Z',
+    updatedBy: 'School Administration',
+  },
+  {
+    id: 'school-documents',
+    name: 'SCHOOL DOCUMENTS',
+    description: 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies.',
+    driveUrl: 'https://drive.google.com/drive/folders/1IBAtKJMb0zESnCQ7pRE0H3mN9hGxzPpD?usp=drive_link',
+    driveId: '1IBAtKJMb0zESnCQ7pRE0H3mN9hGxzPpD',
+    category: 'General Subject Materials',
+    color: 'Emerald',
+    isPermanent: true,
+    updatedAt: '2026-03-01T00:00:00.000Z',
+    updatedBy: 'School Administration',
+  },
+];
 
 export const INITIAL_DRIVE_FOLDERS: DriveFolder[] = [
   {

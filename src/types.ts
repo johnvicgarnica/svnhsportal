@@ -4,6 +4,7 @@ export interface UserProfile {
   email: string;
   role: 'Faculty' | 'Student' | 'Admin';
   department: string;
+  designation?: string;
   avatarUrl?: string;
 }
 
@@ -53,6 +54,19 @@ export interface FacultyFolder {
   itemCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SchoolPermanentFolder {
+  id: 'school-forms' | 'school-documents';
+  name: 'SCHOOL FORMS' | 'SCHOOL DOCUMENTS';
+  description: string;
+  driveUrl: string;
+  driveId?: string;
+  category: string;
+  color: string;
+  isPermanent: true;
+  updatedAt: string;
+  updatedBy?: string;
 }
 
 export interface FacultyPersonalFile {

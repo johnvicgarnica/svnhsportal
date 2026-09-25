@@ -164,7 +164,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [isSettingActiveTerm, setIsSettingActiveTerm] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'with-comments' | 'incomplete' | 'in-progress' | 'none'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'with-comments' | 'incomplete' | 'late' | 'in-progress' | 'none'>('all');
   const [viewMode, setViewMode] = useState<'faculty-chart' | 'weekly-chart' | 'pie-chart'>('faculty-chart');
   const [facultyPieTab, setFacultyPieTab] = useState<'both' | 'compliance' | 'volume' | 'periods'>('both');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
@@ -558,8 +558,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     const currentComments: Record<string, string> = itemComments[cleanEmail]
       ? { ...itemComments[cleanEmail] }
       : {};
-    if (newStatus === 'with-comments' || newStatus === 'incomplete') {
-      currentComments[String(itemIndex)] = commentText.trim();
+    if (newStatus === 'with-comments' || newStatus === 'incomplete' || newStatus === 'late') {
+      currentComments[String(itemIndex)] = commentText.trim() || (newStatus === 'late' ? 'Submitted late.' : '');
     } else {
       delete currentComments[String(itemIndex)];
       delete currentComments[itemIndex];
@@ -578,6 +578,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         ? 'With Comments (Corrections)'
         : newStatus === 'incomplete'
         ? 'Incomplete (Lacking Requirements)'
+        : newStatus === 'late'
+        ? 'Late (Submitted Late)'
         : 'Unchecked (Pending)';
     const itemKey = `${cleanEmail}_${itemIndex}`;
 
@@ -729,6 +731,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         const fStatuses = itemStatuses[cleanEmail] || [];
         matchStatus = fStatuses.slice(0, totalItemCount).some((s) => s === 'incomplete');
       }
+      else if (statusFilter === 'late') {
+        const cleanEmail = f.email.toLowerCase().trim();
+        const fStatuses = itemStatuses[cleanEmail] || [];
+        matchStatus = fStatuses.slice(0, totalItemCount).some((s) => s === 'late');
+      }
       else if (statusFilter === 'in-progress') matchStatus = count > 0 && count < totalItemCount;
       else if (statusFilter === 'none') matchStatus = count === 0;
 
@@ -743,11 +750,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     let totalCleanChecked = 0;
     let totalWithComments = 0;
     let totalIncomplete = 0;
+    let totalLate = 0;
     let completedFacultyCount = 0;
     let inProgressFacultyCount = 0;
     let noSubmissionFacultyCount = 0;
     let facultyWithCommentsCount = 0;
     let facultyWithIncompleteCount = 0;
+    let facultyWithLateCount = 0;
 
     allFaculty.forEach((f) => {
       const cleanEmail = f.email.toLowerCase().trim();
@@ -759,6 +768,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       const fStatuses = itemStatuses[cleanEmail] || [];
       let fHasComments = false;
       let fHasIncomplete = false;
+      let fHasLate = false;
       for (let i = 0; i < totalItemCount; i++) {
         const st: ItemSubmissionStatus = fStatuses[i] || (visibleSlice[i] ? 'checked' : 'unchecked');
         if (st === 'checked') {
@@ -769,11 +779,15 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         } else if (st === 'incomplete') {
           totalIncomplete++;
           fHasIncomplete = true;
+        } else if (st === 'late') {
+          totalLate++;
+          fHasLate = true;
         }
       }
 
       if (fHasComments) facultyWithCommentsCount++;
       if (fHasIncomplete) facultyWithIncompleteCount++;
+      if (fHasLate) facultyWithLateCount++;
       if (count === totalItemCount) completedFacultyCount++;
       else if (count > 0) inProgressFacultyCount++;
       else noSubmissionFacultyCount++;
@@ -789,8 +803,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       totalCleanChecked,
       totalWithComments,
       totalIncomplete,
+      totalLate,
       facultyWithCommentsCount,
       facultyWithIncompleteCount,
+      facultyWithLateCount,
       completedFacultyCount,
       inProgressFacultyCount,
       noSubmissionFacultyCount,
@@ -812,6 +828,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     let cleanCheckedCount = 0;
     let withCommentsCount = 0;
     let incompleteCount = 0;
+    let lateCount = 0;
     const itemsStatuses: ItemSubmissionStatus[] = [];
     const itemsCommentsList: string[] = [];
 
@@ -824,6 +841,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       if (st === 'checked') cleanCheckedCount++;
       else if (st === 'with-comments') withCommentsCount++;
       else if (st === 'incomplete') incompleteCount++;
+      else if (st === 'late') lateCount++;
     }
 
     const pendingCount = Math.max(0, totalItemCount - count);
@@ -836,11 +854,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       cleanCheckedCount,
       withCommentsCount,
       incompleteCount,
+      lateCount,
       pendingCount,
       itemsStatuses,
       itemsComments: itemsCommentsList,
       hasComments: withCommentsCount > 0,
       hasIncomplete: incompleteCount > 0,
+      hasLate: lateCount > 0,
     };
   }, [currentUser, submissions, itemStatuses, itemComments, totalItemCount]);
 
@@ -946,6 +966,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         description: `Deliverables marked lacking required components or attachments`,
       },
       {
+        name: 'Late (Submitted Late)',
+        shortName: 'Late',
+        value: stats.totalLate,
+        color: '#F97316', // Orange 500
+        percentage: stats.totalPossible > 0 ? Math.round((stats.totalLate / stats.totalPossible) * 100) : 0,
+        description: `Deliverables submitted past the scheduled deadline`,
+      },
+      {
         name: 'Pending Deliverables',
         shortName: 'Pending',
         value: pendingItems,
@@ -996,11 +1024,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         'Total Clean Checked',
         'Total With Comments',
         'Total Incomplete',
+        'Total Late',
         'Pending Deliverables',
         'My Personal Submissions',
         'My Clean Checked',
         'My With Comments',
         'My Incomplete',
+        'My Late',
         'My Compliance %',
       ];
       const row = [
@@ -1011,11 +1041,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         stats.totalCleanChecked,
         stats.totalWithComments,
         stats.totalIncomplete,
+        stats.totalLate,
         Math.max(0, stats.totalPossible - stats.totalCompleted),
         `"${myStatus.itemsSubmitted}/${totalItemCount}"`,
         myStatus.cleanCheckedCount,
         myStatus.withCommentsCount,
         myStatus.incompleteCount,
+        myStatus.lateCount,
         `"${myStatus.percentage}%"`,
       ];
 
@@ -1049,6 +1081,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       'Checked (Clean)',
       'With Comments',
       'Incomplete (Lacking)',
+      'Late (Submitted Late)',
       'Completion %',
     ];
     const rows = allFaculty.map((f) => {
@@ -1063,6 +1096,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       let cleanCount = 0;
       let commentedCount = 0;
       let incompleteCount = 0;
+      let lateCount = 0;
 
       const cols = visibleSlice.map((_, i) => {
         const st = fStatuses[i] || (visibleSlice[i] ? 'checked' : 'unchecked');
@@ -1080,6 +1114,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           const comm = fComments[String(i)] || fComments[i];
           return comm ? `INCOMPLETE ("${comm.replace(/"/g, '""')}")` : 'INCOMPLETE';
         }
+        if (st === 'late') {
+          lateCount++;
+          const comm = fComments[String(i)] || fComments[i];
+          return comm ? `LATE ("${comm.replace(/"/g, '""')}")` : 'LATE';
+        }
         return 'PENDING';
       });
 
@@ -1095,6 +1134,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         cleanCount,
         commentedCount,
         incompleteCount,
+        lateCount,
         `"${pct}%"`,
       ];
     });
@@ -1127,6 +1167,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         `Total Checked (No Comments): ${stats.totalCleanChecked}\n` +
         `Total With Comments: ${stats.totalWithComments}\n` +
         `Total Incomplete (Lacking): ${stats.totalIncomplete}\n` +
+        `Total Late Submissions: ${stats.totalLate}\n` +
         `100% Completed: ${stats.completedFacultyCount} / ${stats.totalFaculty} (${Math.round((stats.completedFacultyCount / (stats.totalFaculty || 1)) * 100)}%)\n` +
         `In Progress: ${stats.inProgressFacultyCount} / ${stats.totalFaculty}\n` +
         `Pending/Not Started: ${stats.noSubmissionFacultyCount} / ${stats.totalFaculty}\n` +
@@ -1134,7 +1175,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         `My Personal Status (${currentUser.name}): ${myStatus.itemsSubmitted} / ${totalItemCount} (${myStatus.percentage}%)\n` +
         `- Checked (Clean): ${myStatus.cleanCheckedCount}\n` +
         `- With Comments: ${myStatus.withCommentsCount}\n` +
-        `- Incomplete (Lacking): ${myStatus.incompleteCount}\n`;
+        `- Incomplete (Lacking): ${myStatus.incompleteCount}\n` +
+        `- Late: ${myStatus.lateCount}\n`;
       navigator.clipboard.writeText(summaryText);
       showToast(`📋 ${currentCategory.name} Summary copied to clipboard!`);
       return;
@@ -1148,6 +1190,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       `Total Checked (No Comments): ${stats.totalCleanChecked}\n` +
       `Total With Comments: ${stats.totalWithComments}\n` +
       `Total Incomplete (Lacking): ${stats.totalIncomplete}\n` +
+      `Total Late Submissions: ${stats.totalLate}\n` +
       `100% Completed: ${stats.completedFacultyCount} / ${stats.totalFaculty}\n\n` +
       `Faculty Compliance List:\n` +
       allFaculty
@@ -1159,13 +1202,15 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           let clean = 0;
           let withComm = 0;
           let inc = 0;
+          let late = 0;
           for (let i = 0; i < totalItemCount; i++) {
             const st = fStatuses[i] || (items[i] ? 'checked' : 'unchecked');
             if (st === 'checked') clean++;
             else if (st === 'with-comments') withComm++;
             else if (st === 'incomplete') inc++;
+            else if (st === 'late') late++;
           }
-          return `- ${f.surname}, ${f.name} (${f.department}): ${count}/${totalItemCount} (${clean} Clean, ${withComm} With Comments, ${inc} Incomplete)`;
+          return `- ${f.surname}, ${f.name} (${f.department}): ${count}/${totalItemCount} (${clean} Clean, ${withComm} With Comments, ${inc} Incomplete, ${late} Late)`;
         })
         .join('\n');
 
@@ -1521,7 +1566,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* Top Metrics Cards (Administrator Only) */}
       {isAdmin && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {/* Metric 1: Overall Compliance */}
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
             <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
@@ -1608,7 +1653,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           </div>
 
           {/* Metric 5: Incomplete (Lacking Requirements) */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2 col-span-2 sm:col-span-1">
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
             <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
               <span>Incomplete (Lacking)</span>
               <div className="p-1.5 bg-rose-50 text-rose-600 rounded-xl">
@@ -1625,6 +1670,27 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
             <p className="text-[11px] text-rose-700 truncate font-mono font-medium">
               {stats.facultyWithIncompleteCount} faculty member(s) have lacking items
+            </p>
+          </div>
+
+          {/* Metric 6: Late Submissions */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2 col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+              <span>Late Submissions</span>
+              <div className="p-1.5 bg-orange-50 text-orange-600 rounded-xl">
+                <Clock className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="text-2xl sm:text-3xl font-extrabold text-orange-600 font-mono">
+                {stats.totalLate}
+              </span>
+              <span className="text-xs text-slate-500 font-mono">
+                late
+              </span>
+            </div>
+            <p className="text-[11px] text-orange-700 truncate font-mono font-medium">
+              {stats.facultyWithLateCount} faculty member(s) have late deliveries
             </p>
           </div>
         </div>
@@ -1646,7 +1712,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
               <p className="text-xs text-slate-600 font-mono">
                 {isWeeklyCategory
-                  ? `${currentTerm.name} instructional progress. Green indicates verified with no comments; Amber indicates corrections requested; Red indicates lacking requirements.`
+                  ? `${currentTerm.name} instructional progress. Green indicates verified with no comments; Amber indicates corrections requested; Red indicates lacking requirements; Orange indicates late submission.`
                   : `Academic terms progress for ${currentCategory.name} (Term 1, Term 2, Term 3). Check below for review status and feedback.`}
               </p>
             </div>
@@ -1682,6 +1748,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <span>{myStatus.incompleteCount} Incomplete (Lacking)</span>
               </div>
             )}
+            {myStatus.lateCount > 0 && (
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-orange-100/80 text-orange-900 rounded-xl text-xs font-mono font-bold border border-orange-300">
+                <Clock className="w-3.5 h-3.5 text-orange-600" />
+                <span>{myStatus.lateCount} Late</span>
+              </div>
+            )}
             <div className="flex items-center space-x-1.5 px-3 py-1 bg-white text-slate-600 rounded-xl text-xs font-mono font-bold border border-slate-200">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span>{myStatus.pendingCount} Pending</span>
@@ -1697,6 +1769,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               const isChecked = status === 'checked';
               const isWithComments = status === 'with-comments';
               const isIncomplete = status === 'incomplete';
+              const isLate = status === 'late';
 
               if (isIncomplete) {
                 return (
@@ -1738,6 +1811,28 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     <span>{col.headerLabel}</span>
                     <MessageSquare className="w-3.5 h-3.5 fill-current" />
                     <span className="text-[10px] bg-amber-700/60 px-1.5 py-0.5 rounded-md font-medium">With Comments</span>
+                  </button>
+                );
+              }
+
+              if (isLate) {
+                return (
+                  <button
+                    key={col.key}
+                    type="button"
+                    onClick={() =>
+                      setFacultyDetailModal({
+                        colLabel: col.fullLabel,
+                        status: 'late',
+                        comment: comment || 'This submission was marked as submitted past deadline by the administrator.',
+                      })
+                    }
+                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-orange-500 text-white border-orange-600 shadow-2xs hover:bg-orange-600 transition-all cursor-pointer"
+                    title={`${col.fullLabel}: Late (Submitted Late) • Click to view remarks`}
+                  >
+                    <span>{col.headerLabel}</span>
+                    <Clock className="w-3.5 h-3.5" />
+                    <span className="text-[10px] bg-orange-700/60 px-1.5 py-0.5 rounded-md font-medium">Late</span>
                   </button>
                 );
               }
@@ -1850,12 +1945,52 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           )}
 
+          {/* Prominent Admin Late Submissions Panel */}
+          {myStatus.lateCount > 0 && (
+            <div className="mt-3 pt-3 border-t border-orange-200/80 bg-orange-500/10 rounded-2xl p-4 border border-orange-300/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 text-orange-950 font-bold text-xs font-mono">
+                  <Clock className="w-4 h-4 text-orange-600" />
+                  <span>Late Submissions Recorded ({myStatus.lateCount} item{myStatus.lateCount > 1 ? 's' : ''}):</span>
+                </div>
+                <span className="text-[11px] font-mono text-orange-900 bg-orange-200/80 px-2.5 py-0.5 rounded-full font-bold">
+                  Submitted Late
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {columnItems.map((col, idx) => {
+                  if (myStatus.itemsStatuses[idx] !== 'late') return null;
+                  const commentText = myStatus.itemsComments[idx];
+                  return (
+                    <div key={col.key} className="bg-white/95 border border-orange-200 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-orange-950 flex items-center space-x-1.5">
+                          <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" />
+                          <span>{col.fullLabel}</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-orange-800 bg-orange-100 px-2 py-0.5 rounded-full">
+                          Late Submission
+                        </span>
+                      </div>
+                      <p className="text-slate-700 pl-3 border-l-2 border-orange-400 text-xs italic">
+                        "{commentText || 'Deliverable was received past the scheduled deadline.'}"
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-orange-900 font-mono pt-1">
+                ⏰ <strong>Reminder:</strong> Please ensure upcoming deliverables are submitted on time according to the department schedule.
+              </p>
+            </div>
+          )}
+
           {/* Clean Compliance Banner */}
-          {myStatus.itemsSubmitted > 0 && myStatus.withCommentsCount === 0 && myStatus.incompleteCount === 0 && (
+          {myStatus.itemsSubmitted > 0 && myStatus.withCommentsCount === 0 && myStatus.incompleteCount === 0 && myStatus.lateCount === 0 && (
             <div className="mt-3 pt-3 border-t border-emerald-100 bg-emerald-50/70 rounded-2xl p-3 border border-emerald-200 flex items-center space-x-2 text-xs font-mono text-emerald-900">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>
-                All <strong>{myStatus.itemsSubmitted}</strong> of your submitted {currentCategory.name} records are <strong>Checked with no comments</strong> (clean compliance). Great job!
+                All <strong>{myStatus.itemsSubmitted}</strong> of your submitted {currentCategory.name} records are <strong>Checked on-time with no comments</strong> (clean compliance). Great job!
               </span>
             </div>
           )}
@@ -1983,11 +2118,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
 
               {/* Status Filter */}
-              <div className="sm:col-span-4 flex items-center space-x-1 text-xs font-mono">
+              <div className="sm:col-span-4 flex items-center space-x-1 text-xs font-mono overflow-x-auto pb-1 sm:pb-0">
                 <button
                   type="button"
                   onClick={() => setStatusFilter('all')}
-                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                  className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'all'
                       ? 'bg-blue-600 text-white'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -1998,7 +2133,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setStatusFilter('complete')}
-                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                  className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'complete'
                       ? 'bg-emerald-600 text-white'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -2009,7 +2144,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setStatusFilter('with-comments')}
-                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                  className={`flex-1 min-w-[55px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'with-comments'
                       ? 'bg-amber-600 text-white'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -2020,7 +2155,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setStatusFilter('incomplete')}
-                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                  className={`flex-1 min-w-[55px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'incomplete'
                       ? 'bg-rose-600 text-white'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -2030,8 +2165,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => setStatusFilter('late')}
+                  className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                    statusFilter === 'late'
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Late ({stats.facultyWithLateCount})
+                </button>
+                <button
+                  type="button"
                   onClick={() => setStatusFilter('in-progress')}
-                  className={`flex-1 py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
+                  className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'in-progress'
                       ? 'bg-slate-700 text-white'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -2151,6 +2297,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           const isChecked = itemStatus === 'checked';
                           const isWithComments = itemStatus === 'with-comments';
                           const isIncomplete = itemStatus === 'incomplete';
+                          const isLate = itemStatus === 'late';
 
                           return (
                             <td
@@ -2170,6 +2317,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                     ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
                                     : isIncomplete
                                     ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
+                                    : isLate
+                                    ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
                                     : 'bg-white border-slate-300 text-transparent hover:border-slate-400 hover:bg-slate-50'
                                 } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
                                 title={`${faculty.name} - ${col.fullLabel}: ${
@@ -2179,12 +2328,15 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                     ? `With Comments: "${itemComment || 'Feedback recorded'}"`
                                     : isIncomplete
                                     ? `Incomplete (Lacking): "${itemComment || 'Lacking requirements'}"`
+                                    : isLate
+                                    ? `Late (Submitted Late): "${itemComment || 'Submitted past deadline'}"`
                                     : 'Pending / Not Checked'
-                                } • Click to select Checked, With Comments, Incomplete, or Pending`}
+                                } • Click to select Checked, With Comments, Incomplete, Late, or Pending`}
                               >
                                 {isChecked && <Check className="w-4 h-4 stroke-[3]" />}
                                 {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
                                 {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
                               </button>
                             </td>
                           );
@@ -2251,6 +2403,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <div className="flex items-center space-x-1.5">
                 <span className="w-3.5 h-3.5 rounded-md bg-rose-500 inline-flex items-center justify-center text-white text-[9px] font-bold">!</span>
                 <span className="text-rose-800 font-bold">Incomplete</span> (Lacking requirements)
+              </div>
+              <span className="text-slate-300">•</span>
+              <div className="flex items-center space-x-1.5">
+                <span className="w-3.5 h-3.5 rounded-md bg-orange-500 inline-flex items-center justify-center text-white text-[9px]">⏰</span>
+                <span className="text-orange-800 font-bold">Late</span> (Submitted late)
               </div>
               <span className="text-slate-300">•</span>
               <div className="flex items-center space-x-1.5">
@@ -3118,7 +3275,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <label className="block text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-2">
                   Select Submission Review Status:
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                   {/* Option 1: Checked (No Comments) */}
                   <button
                     type="button"
@@ -3190,9 +3347,33 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                       Submission has lacking components or missing attachments.
                     </p>
                   </button>
+
+                  {/* Option 4: Late */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedActionType('late')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      selectedActionType === 'late'
+                        ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-orange-900 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-orange-500 text-white flex items-center justify-center text-[10px] font-bold">⏰</span>
+                        <span>Late</span>
+                      </span>
+                      {selectedActionType === 'late' && (
+                        <span className="w-2 h-2 rounded-full bg-orange-500" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                      Submitted past deadline or late delivery deliverable.
+                    </p>
+                  </button>
                 </div>
 
-                {/* Option 4: Reset / Pending */}
+                {/* Option: Reset / Pending */}
                 <div className="mt-2 text-right">
                   <button
                     type="button"
@@ -3208,15 +3389,21 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 </div>
               </div>
 
-              {/* Comments / Notes Input (Shows when With Comments or Incomplete is selected) */}
-              {(selectedActionType === 'with-comments' || selectedActionType === 'incomplete') && (
+              {/* Comments / Notes Input (Shows when With Comments, Incomplete, or Late is selected) */}
+              {(selectedActionType === 'with-comments' || selectedActionType === 'incomplete' || selectedActionType === 'late') && (
                 <div className="space-y-2 pt-1 border-t border-slate-100">
                   <div className="flex items-center justify-between">
                     <label className={`block text-xs font-mono font-bold ${
-                      selectedActionType === 'incomplete' ? 'text-rose-900' : 'text-amber-900'
+                      selectedActionType === 'incomplete'
+                        ? 'text-rose-900'
+                        : selectedActionType === 'late'
+                        ? 'text-orange-900'
+                        : 'text-amber-900'
                     }`}>
                       {selectedActionType === 'incomplete'
                         ? 'Notes on Lacking Components / Missing Parts:'
+                        : selectedActionType === 'late'
+                        ? 'Remarks on Late Submission (Optional):'
                         : 'Corrections / Feedback for Teacher:'}
                     </label>
                     <span className="text-[10px] font-mono text-slate-400">
@@ -3229,12 +3416,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     placeholder={
                       selectedActionType === 'incomplete'
                         ? 'e.g. Missing Week 3 attachment; lacking required competencies; missing rubrics/TOS item distribution...'
+                        : selectedActionType === 'late'
+                        ? 'e.g. Submitted past deadline on [Date]; received late with remarks...'
                         : 'e.g. Please revise learning competencies; missing supervisor signature; incomplete items...'
                     }
                     rows={3}
                     className={`w-full p-3 bg-white border rounded-2xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 resize-none shadow-2xs ${
                       selectedActionType === 'incomplete'
                         ? 'border-rose-300 focus:ring-rose-500'
+                        : selectedActionType === 'late'
+                        ? 'border-orange-300 focus:ring-orange-500'
                         : 'border-amber-300 focus:ring-amber-500'
                     }`}
                   />
@@ -3254,6 +3445,15 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             'Missing Department Head / Supervisor signature.',
                             'Please upload the lacking materials to your folder.',
                           ]
+                        : selectedActionType === 'late'
+                        ? [
+                            'Submitted past deadline.',
+                            'Late submission - received after scheduled cut-off date.',
+                            'Accepted with late compliance remarks.',
+                            'Submitted late due to excused school activity.',
+                            'Deliverable received late; approved with note.',
+                            'Please ensure future deliverables are submitted on time.',
+                          ]
                         : [
                             'Please attach complete learning objectives & competencies.',
                             'Missing signature or date.',
@@ -3269,6 +3469,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           className={`text-[10px] font-mono px-2 py-1 rounded-lg transition-all cursor-pointer border ${
                             selectedActionType === 'incomplete'
                               ? 'bg-slate-100 hover:bg-rose-100 hover:text-rose-900 text-slate-600 border-slate-200'
+                              : selectedActionType === 'late'
+                              ? 'bg-slate-100 hover:bg-orange-100 hover:text-orange-900 text-slate-600 border-slate-200'
                               : 'bg-slate-100 hover:bg-amber-100 hover:text-amber-900 text-slate-600 border-slate-200'
                           }`}
                         >
@@ -3290,6 +3492,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     ? 'bg-amber-100 text-amber-900'
                     : selectedActionType === 'incomplete'
                     ? 'bg-rose-100 text-rose-900'
+                    : selectedActionType === 'late'
+                    ? 'bg-orange-100 text-orange-900'
                     : 'bg-slate-200 text-slate-700'
                 }`}>
                   {selectedActionType === 'checked'
@@ -3298,6 +3502,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     ? '💬 With Comments'
                     : selectedActionType === 'incomplete'
                     ? '⚠️ Incomplete (Lacking)'
+                    : selectedActionType === 'late'
+                    ? '⏰ Late (Submitted Late)'
                     : '⚪ Pending (Unchecked)'}
                 </span>
               </div>
@@ -3330,6 +3536,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     ? 'bg-amber-600 hover:bg-amber-500'
                     : selectedActionType === 'incomplete'
                     ? 'bg-rose-600 hover:bg-rose-500'
+                    : selectedActionType === 'late'
+                    ? 'bg-orange-600 hover:bg-orange-500'
                     : 'bg-slate-700 hover:bg-slate-600'
                 }`}
               >
@@ -3349,16 +3557,22 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             <div className={`p-5 border-b flex items-center justify-between ${
               facultyDetailModal.status === 'incomplete'
                 ? 'bg-rose-50 border-rose-200'
+                : facultyDetailModal.status === 'late'
+                ? 'bg-orange-50 border-orange-200'
                 : 'bg-amber-50 border-amber-200'
             }`}>
               <div className="flex items-center space-x-2.5">
                 <div className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shadow-xs ${
                   facultyDetailModal.status === 'incomplete'
                     ? 'bg-rose-500'
+                    : facultyDetailModal.status === 'late'
+                    ? 'bg-orange-500'
                     : 'bg-amber-500'
                 }`}>
                   {facultyDetailModal.status === 'incomplete' ? (
                     <AlertCircle className="w-5 h-5" />
+                  ) : facultyDetailModal.status === 'late' ? (
+                    <Clock className="w-5 h-5" />
                   ) : (
                     <MessageSquare className="w-5 h-5 fill-current" />
                   )}
@@ -3367,10 +3581,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   <h3 className="text-sm font-bold text-slate-900 font-sans">
                     {facultyDetailModal.status === 'incomplete'
                       ? 'Incomplete Deliverable Details'
+                      : facultyDetailModal.status === 'late'
+                      ? 'Late Submission Remarks'
                       : 'Administrator Feedback & Corrections'}
                   </h3>
                   <p className={`text-xs font-mono font-bold ${
-                    facultyDetailModal.status === 'incomplete' ? 'text-rose-800' : 'text-amber-800'
+                    facultyDetailModal.status === 'incomplete'
+                      ? 'text-rose-800'
+                      : facultyDetailModal.status === 'late'
+                      ? 'text-orange-800'
+                      : 'text-amber-800'
                   }`}>
                     {facultyDetailModal.colLabel}
                   </p>
@@ -3393,18 +3613,30 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-md border ${
                   facultyDetailModal.status === 'incomplete'
                     ? 'text-rose-900 bg-rose-100 border-rose-300'
+                    : facultyDetailModal.status === 'late'
+                    ? 'text-orange-900 bg-orange-100 border-orange-300'
                     : 'text-amber-900 bg-amber-100 border-amber-300'
                 }`}>
-                  Status: {facultyDetailModal.status === 'incomplete' ? 'Incomplete (Lacking Requirements)' : 'With Comments (Corrections)'}
+                  Status: {facultyDetailModal.status === 'incomplete'
+                    ? 'Incomplete (Lacking Requirements)'
+                    : facultyDetailModal.status === 'late'
+                    ? 'Late (Submitted Late)'
+                    : 'With Comments (Corrections)'}
                 </span>
                 <span className="text-xs text-slate-500">
-                  {facultyDetailModal.status === 'incomplete' ? 'Action needed to complete deliverable' : 'Action required by teacher'}
+                  {facultyDetailModal.status === 'incomplete'
+                    ? 'Action needed to complete deliverable'
+                    : facultyDetailModal.status === 'late'
+                    ? 'Submission received past deadline'
+                    : 'Action required by teacher'}
                 </span>
               </div>
 
               <div className={`p-4 rounded-r-xl border-l-4 ${
                 facultyDetailModal.status === 'incomplete'
                   ? 'bg-rose-50/70 border-rose-500'
+                  : facultyDetailModal.status === 'late'
+                  ? 'bg-orange-50/70 border-orange-500'
                   : 'bg-amber-50/70 border-amber-500'
               }`}>
                 <p className="text-xs text-slate-800 leading-relaxed italic">
@@ -3420,6 +3652,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <p className="text-[11px] text-blue-800">
                   {facultyDetailModal.status === 'incomplete'
                     ? 'Please provide the missing parts, attachments, or competencies and upload the complete file into your personal Faculty Folder. Once updated, the administrator will verify and mark it clean.'
+                    : facultyDetailModal.status === 'late'
+                    ? 'Your submission has been received and logged as late. For succeeding submissions, please ensure your DLL, TOS, or TQ files are submitted on or before the designated deadline schedule.'
                     : 'Please make the necessary revisions to your deliverable and upload the updated document into your personal Faculty Folder. Once submitted, the administrator will review and mark it clean.'}
                 </p>
               </div>

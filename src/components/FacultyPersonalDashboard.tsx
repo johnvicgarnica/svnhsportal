@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FacultyFolder,
   FacultyPersonalFile,
   UserProfile,
+  SchoolPermanentFolder,
 } from '../types';
-import { extractDriveId } from '../lib/firebase';
+import { extractDriveId, getStoredSchoolPermanentFolders, subscribeSchoolPermanentFolders } from '../lib/firebase';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import {
   Folder,
@@ -41,18 +42,22 @@ import {
   RefreshCw,
   LayoutGrid,
   Maximize2,
+  Lock,
+  FolderLock,
 } from 'lucide-react';
 
 interface FacultyPersonalDashboardProps {
   currentUser: UserProfile;
   facultyFolders: FacultyFolder[];
   facultyFiles: FacultyPersonalFile[];
+  schoolPermanentFolders?: SchoolPermanentFolder[];
   onAddFolder: (folder: Omit<FacultyFolder, 'id' | 'createdAt' | 'updatedAt' | 'itemCount'>) => void;
   onEditFolder: (id: string, updated: Partial<FacultyFolder>) => void;
   onDeleteFolder: (id: string) => void;
   onAddFile: (file: Omit<FacultyPersonalFile, 'id' | 'uploadedAt'>) => void;
   onDeleteFile: (id: string) => void;
   onNavigateToRepository?: () => void;
+  onNavigateToAdminDashboard?: () => void;
 }
 
 const CATEGORY_OPTIONS = [
@@ -80,13 +85,37 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   currentUser,
   facultyFolders,
   facultyFiles,
+  schoolPermanentFolders,
   onAddFolder,
   onEditFolder,
   onDeleteFolder,
   onAddFile,
   onDeleteFile,
   onNavigateToRepository,
+  onNavigateToAdminDashboard,
 }) => {
+  // Permanent School-Wide Folders state ("SCHOOL FORMS" and "SCHOOL DOCUMENTS")
+  const [livePermanentFolders, setLivePermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
+    return schoolPermanentFolders && schoolPermanentFolders.length > 0
+      ? schoolPermanentFolders
+      : getStoredSchoolPermanentFolders();
+  });
+
+  useEffect(() => {
+    if (schoolPermanentFolders && schoolPermanentFolders.length > 0) {
+      setLivePermanentFolders(schoolPermanentFolders);
+    }
+  }, [schoolPermanentFolders]);
+
+  useEffect(() => {
+    const unsub = subscribeSchoolPermanentFolders((folders) => {
+      if (folders && folders.length > 0) {
+        setLivePermanentFolders(folders);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   // Filter STRICTLY for current logged in faculty member
   const userEmail = (currentUser.email || '').toLowerCase().trim();
   const myFolders = useMemo(() => {
@@ -104,9 +133,69 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   // Selected Active Folder
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
+  // Active Folder Object (Resolves either to permanent school folder or personal faculty folder)
+  const activePermanentFolder = useMemo(() => {
+    if (!activeFolderId) return null;
+    return livePermanentFolders.find((f) => f.id === activeFolderId) || null;
+  }, [livePermanentFolders, activeFolderId]);
+
+  const activePersonalFolder = useMemo(() => {
+    if (!activeFolderId) return null;
+    return myFolders.find((f) => f.id === activeFolderId) || null;
+  }, [myFolders, activeFolderId]);
+
+  const isPermanentActive = Boolean(activePermanentFolder);
+
+  const activeFolder = useMemo(() => {
+    if (activePermanentFolder) {
+      return {
+        id: activePermanentFolder.id,
+        name: activePermanentFolder.name,
+        description: activePermanentFolder.description,
+        category: activePermanentFolder.category,
+        color: activePermanentFolder.color,
+        driveUrl: activePermanentFolder.driveUrl,
+        driveId: activePermanentFolder.driveId,
+        facultyEmail: 'admin@deped.gov.ph',
+        facultyName: 'School Administration',
+        facultySurname: 'Admin',
+        createdAt: activePermanentFolder.updatedAt,
+        updatedAt: activePermanentFolder.updatedAt,
+      } as FacultyFolder;
+    }
+    return activePersonalFolder;
+  }, [activePermanentFolder, activePersonalFolder]);
+
   // Search and Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
+
+  // Filtered permanent folders
+  const filteredPermanentFolders = useMemo(() => {
+    return livePermanentFolders.filter((f) => {
+      const matchSearch =
+        searchTerm === '' ||
+        f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (f.description && f.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (f.category && f.category.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchCategory =
+        selectedCategoryFilter === 'all' || f.category === selectedCategoryFilter;
+      return matchSearch && matchCategory;
+    });
+  }, [livePermanentFolders, searchTerm, selectedCategoryFilter]);
+
+  // Filtered personal folders
+  const filteredFolders = useMemo(() => {
+    return myFolders.filter((folder) => {
+      const matchesSearch =
+        searchTerm === '' ||
+        folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (folder.description && folder.description.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchesCategory =
+        selectedCategoryFilter === 'all' || folder.category === selectedCategoryFilter;
+      return matchesSearch && matchesCategory;
+    });
+  }, [myFolders, searchTerm, selectedCategoryFilter]);
 
   // Modals & Webview State
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -149,28 +238,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const activeFolder = useMemo(() => {
-    if (!activeFolderId) return null;
-    return myFolders.find((f) => f.id === activeFolderId) || null;
-  }, [myFolders, activeFolderId]);
-
   const filesInActiveFolder = useMemo(() => {
     if (!activeFolderId) return [];
     return myFiles.filter((f) => f.folderId === activeFolderId);
   }, [myFiles, activeFolderId]);
-
-  // Filtered Folders for List/Grid
-  const filteredFolders = useMemo(() => {
-    return myFolders.filter((folder) => {
-      const matchesSearch =
-        folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (folder.description && folder.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (folder.category && folder.category.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesCategory =
-        selectedCategoryFilter === 'all' || folder.category === selectedCategoryFilter;
-      return matchesSearch && matchesCategory;
-    });
-  }, [myFolders, searchTerm, selectedCategoryFilter]);
 
   const handleOpenNewFolderModal = () => {
     setFolderName('');
@@ -184,6 +255,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
   const handleOpenEditFolderModal = (folder: FacultyFolder, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (folder.id === 'school-forms' || folder.id === 'school-documents') {
+      showToast('Permanent school-wide folders can only be edited by administrators in the Admin Dashboard.');
+      return;
+    }
     setEditingFolder(folder);
     setFolderName(folder.name);
     setFolderDescription(folder.description || '');
@@ -203,6 +278,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     const driveId = extractDriveId(folderDriveUrl.trim());
 
     if (editingFolder) {
+      if (editingFolder.id === 'school-forms' || editingFolder.id === 'school-documents') {
+        showToast('Permanent school-wide folders cannot be edited here. Use Admin Dashboard.');
+        setIsNewFolderModalOpen(false);
+        return;
+      }
       onEditFolder(editingFolder.id, {
         name: folderName.trim(),
         description: folderDescription.trim(),
@@ -232,6 +312,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
   const handleDeleteFolderConfirm = (folderId: string, folderTitle: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (folderId === 'school-forms' || folderId === 'school-documents') {
+      showToast('Permanent school-wide folders cannot be deleted.');
+      return;
+    }
     if (window.confirm(`Are you sure you want to delete the folder "${folderTitle}" and all files inside it? This action cannot be undone.`)) {
       onDeleteFolder(folderId);
       if (activeFolderId === folderId) {
@@ -381,18 +465,16 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         {/* Quick Workspace Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/10 text-xs font-mono">
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-            <div className="text-blue-200 text-[11px]">My Folders</div>
+            <div className="text-blue-200 text-[11px]">School Permanent Folders</div>
+            <div className="text-xl font-bold text-white mt-0.5">2</div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
+            <div className="text-blue-200 text-[11px]">Personal Folders</div>
             <div className="text-xl font-bold text-white mt-0.5">{myFolders.length}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-            <div className="text-blue-200 text-[11px]">Uploaded Files</div>
+            <div className="text-blue-200 text-[11px]">Personal Files</div>
             <div className="text-xl font-bold text-white mt-0.5">{myFiles.length}</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-            <div className="text-blue-200 text-[11px]">Google Drive Links</div>
-            <div className="text-xl font-bold text-white mt-0.5">
-              {myFolders.filter((f) => Boolean(f.driveUrl)).length + myFiles.filter((f) => f.isGoogleDriveLink).length}
-            </div>
           </div>
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
             <div className="text-blue-200 text-[11px]">Status</div>
@@ -423,44 +505,102 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               <div className="h-5 w-px bg-slate-200" />
 
               <div className="flex items-center space-x-2">
-                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                  <FolderOpen className="w-5 h-5" />
+                <div className={`p-2 rounded-xl ${isPermanentActive ? 'bg-indigo-50 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>
+                  {isPermanentActive ? <FolderLock className="w-5 h-5" /> : <FolderOpen className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
-                    {activeFolder.name}
-                  </h2>
-                  <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono">
+                  <div className="flex items-center space-x-2">
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
+                      {activeFolder.name}
+                    </h2>
+                    {isPermanentActive && (
+                      <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase flex items-center space-x-1">
+                        <Lock className="w-3 h-3" />
+                        <span>Permanent</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono mt-0.5">
                     <span className="bg-slate-100 px-2 py-0.5 rounded-md font-semibold text-slate-700">
                       {activeFolder.category || 'General'}
                     </span>
                     <span>•</span>
-                    <span>{filesInActiveFolder.length} items</span>
+                    {isPermanentActive ? (
+                      <span className="text-emerald-700 font-bold">Admin Managed Link • Read Access</span>
+                    ) : (
+                      <span>{filesInActiveFolder.length} personal items</span>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={(e) => handleOpenEditFolderModal(activeFolder, e)}
-                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer"
-                title="Edit Folder Details"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
+              {isPermanentActive ? (
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] font-mono text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl font-bold flex items-center space-x-1.5">
+                    <Lock className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Permanent School Folder</span>
+                  </span>
+                  {currentUser.role === 'Admin' && onNavigateToAdminDashboard && (
+                    <button
+                      type="button"
+                      onClick={onNavigateToAdminDashboard}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-2xs flex items-center space-x-1 cursor-pointer"
+                      title="Administrators can change this embedded link in the Admin Dashboard"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit Link in Admin Dashboard</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => handleOpenEditFolderModal(activeFolder, e)}
+                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer"
+                    title="Edit Folder Details"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={(e) => handleDeleteFolderConfirm(activeFolder.id, activeFolder.name, e)}
-                className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl transition-all cursor-pointer"
-                title="Delete Folder"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteFolderConfirm(activeFolder.id, activeFolder.name, e)}
+                    className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl transition-all cursor-pointer"
+                    title="Delete Folder"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
+
+          {/* School-Wide Permanent Banner */}
+          {isPermanentActive && (
+            <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-emerald-50 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono shadow-2xs">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-900 text-xs sm:text-sm">
+                    Official Central School Repository • {activeFolder.name}
+                  </div>
+                  <div className="text-slate-600 text-[11px] mt-0.5">
+                    This folder is permanent and visible to all faculty members. The embedded Google Drive link is centrally managed by School Administration through the Admin Dashboard.
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0">
+                <span className="text-[10px] text-indigo-900 bg-white/90 px-2.5 py-1 rounded-lg border border-indigo-200 font-bold uppercase">
+                  DepEd Official Link
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Folder Description and Optional Google Drive Link Banner */}
           {activeFolder.description && (
@@ -598,42 +738,168 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             </div>
           </div>
 
-          {/* Folders Grid / Empty State */}
-          {myFolders.length === 0 ? (
-            <div className="bg-white border-2 border-dashed border-blue-200 rounded-3xl p-10 sm:p-16 text-center space-y-4 shadow-sm">
-              <div className="w-16 h-16 rounded-3xl bg-blue-50 border border-blue-200 text-blue-600 mx-auto flex items-center justify-center shadow-inner">
-                <FolderPlus className="w-8 h-8" />
+          {/* SECTION 1: PERMANENT SCHOOL-WIDE FOLDERS */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg">
+                  <FolderLock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900 flex items-center space-x-2">
+                    <span>School Permanent Folders</span>
+                    <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.2 rounded-full font-bold">
+                      Set for All Faculty
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Official central folders. The embedded Google Drive link is managed centrally by administrators.
+                  </p>
+                </div>
               </div>
-              <div className="space-y-1">
-                <h3 className="text-lg font-bold text-slate-900">Your Workspace is Empty</h3>
-                <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-                  You do not have any personal folders yet. Create your first folder to begin organizing your Daily Lesson Logs (DLL), Table of Specifications, and teaching resources.
-                </p>
+              <div className="text-[11px] font-mono text-slate-500 hidden sm:block">
+                {filteredPermanentFolders.length} of 2 Folders
               </div>
+            </div>
+
+            {filteredPermanentFolders.length === 0 ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-xs font-mono text-slate-500">
+                No permanent school folders match "{searchTerm}".
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredPermanentFolders.map((permFolder) => {
+                  const isForms = permFolder.id === 'school-forms';
+                  const bgGradient = isForms
+                    ? 'from-blue-50/70 to-indigo-50/50 hover:border-blue-500'
+                    : 'from-emerald-50/70 to-teal-50/50 hover:border-emerald-500';
+                  const iconBg = isForms ? 'bg-blue-600' : 'bg-emerald-600';
+                  const badgeColor = isForms
+                    ? 'bg-blue-100 text-blue-800 border-blue-200'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-200';
+
+                  return (
+                    <div
+                      key={permFolder.id}
+                      onClick={() => setActiveFolderId(permFolder.id)}
+                      className={`bg-gradient-to-br ${bgGradient} border-2 border-slate-200 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden`}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center space-x-3">
+                            <div className={`p-3 rounded-2xl ${iconBg} text-white shadow-xs shrink-0`}>
+                              {isForms ? <FileSpreadsheet className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeColor}`}>
+                                  {permFolder.category}
+                                </span>
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-200/80 text-slate-700 flex items-center space-x-1">
+                                  <Lock className="w-3 h-3 text-slate-600" />
+                                  <span>Permanent</span>
+                                </span>
+                              </div>
+                              <h3 className="font-extrabold text-base sm:text-lg text-slate-900 group-hover:text-blue-700 transition-colors mt-1 font-sans">
+                                {permFolder.name}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <div
+                            className="p-1.5 text-slate-400 bg-white/80 rounded-xl border border-slate-200 shadow-2xs"
+                            title="Permanent School Folder (Admin Managed Link)"
+                          >
+                            <Lock className="w-4 h-4 text-slate-500" />
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed font-sans">
+                          {permFolder.description}
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs font-mono">
+                        <span className="text-[10px] text-slate-500 flex items-center space-x-1 font-semibold">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Admin Configured Drive Link</span>
+                        </span>
+
+                        <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-700 group-hover:translate-x-1 transition-transform">
+                          <span>Open Live Drive</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 2: PERSONAL FACULTY FOLDERS */}
+          <div className="space-y-4 pt-4 border-t border-slate-200/80">
+            <div className="flex items-center justify-between pb-1">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                  <Folder className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900">
+                    Personal Faculty Folders ({myFolders.length})
+                  </h2>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Your private DLL, TOS, TQ, and instructional materials folders.
+                  </p>
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={handleOpenNewFolderModal}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-sm inline-flex items-center space-x-2 cursor-pointer hover:scale-105 active:scale-95"
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-2xs cursor-pointer"
               >
-                <FolderPlus className="w-4 h-4 text-white" />
-                <span>+ Create First Personal Folder</span>
+                <FolderPlus className="w-3.5 h-3.5" />
+                <span>+ New Folder</span>
               </button>
             </div>
-          ) : filteredFolders.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center text-xs font-mono text-slate-500 space-y-2">
-              <p>No folders match your search query: "{searchTerm}"</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchTerm('');
-                  setSelectedCategoryFilter('all');
-                }}
-                className="text-blue-600 hover:underline font-bold"
-              >
-                Reset filters
-              </button>
-            </div>
-          ) : (
+
+            {/* Folders Grid / Empty State */}
+            {myFolders.length === 0 ? (
+              <div className="bg-white border-2 border-dashed border-blue-200 rounded-3xl p-8 sm:p-12 text-center space-y-4 shadow-sm">
+                <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 text-blue-600 mx-auto flex items-center justify-center shadow-inner">
+                  <FolderPlus className="w-7 h-7" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">No Personal Folders Created Yet</h3>
+                  <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+                    You have access to the permanent school folders above. You can also create personal folders to organize your Daily Lesson Logs (DLL), Table of Specifications, and personal teaching materials.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenNewFolderModal}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-sm inline-flex items-center space-x-2 cursor-pointer hover:scale-105 active:scale-95"
+                >
+                  <FolderPlus className="w-4 h-4 text-white" />
+                  <span>+ Create Personal Folder</span>
+                </button>
+              </div>
+            ) : filteredFolders.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center text-xs font-mono text-slate-500 space-y-2">
+                <p>No personal folders match your search query: "{searchTerm}"</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSelectedCategoryFilter('all');
+                  }}
+                  className="text-blue-600 hover:underline font-bold"
+                >
+                  Reset filters
+                </button>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredFolders.map((folder) => {
                 const filesCount = myFiles.filter((f) => f.folderId === folder.id).length;
@@ -723,6 +989,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               })}
             </div>
           )}
+          </div>
         </div>
       )}
 

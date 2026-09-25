@@ -64,7 +64,26 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   // Live Firestore State
   const [facultyList, setFacultyList] = useState<FacultyDoc[]>([]);
-  const [adminList, setAdminList] = useState<AdminDoc[]>([]);
+  const [adminList, setAdminList] = useState<AdminDoc[]>([
+    {
+      id: 'admin-master',
+      name: 'John Vic Garnica (Admin)',
+      email: 'johnvic.garnica@deped.gov.ph',
+      designation: 'Web Developer',
+    },
+    {
+      id: 'admin-marivic',
+      name: 'Marivic R. Villaluz',
+      email: 'marivic.villaluz@deped.gov.ph',
+      designation: 'School Principal',
+    },
+    {
+      id: 'admin-norma',
+      name: 'Norma Jabagat',
+      email: 'norma.jabagat@deped.gov.ph',
+      designation: 'Master Teacher',
+    },
+  ]);
   const [facultyRequests, setFacultyRequests] = useState<RegistrationReqDoc[]>([]);
   const [adminRequests, setAdminRequests] = useState<RegistrationReqDoc[]>([]);
   const [facultyPasswords, setFacultyPasswords] = useState<Record<string, string>>({});
@@ -174,7 +193,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [isAdminRegisterOpen, setIsAdminRegisterOpen] = useState(false);
   const [adminRegName, setAdminRegName] = useState('');
   const [adminRegEmail, setAdminRegEmail] = useState('');
-  const [adminRegDesignation, setAdminRegDesignation] = useState('School Administrator');
+  const [adminRegDesignation, setAdminRegDesignation] = useState<'School Principal' | 'Master Teacher' | 'Coordinator'>('School Principal');
   const [adminRegPassword, setAdminRegPassword] = useState('');
   const [showAdminRegPassword, setShowAdminRegPassword] = useState(false);
   const [adminRegError, setAdminRegError] = useState<string | null>(null);
@@ -218,6 +237,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     let role: 'Faculty' | 'Student' | 'Admin' = 'Faculty';
     let name = 'Faculty Member';
     let userDepartment = 'Senior High School Department';
+    let userDesignation: string | undefined = undefined;
 
     if (loginMode === 'admin') {
       const cleanMasterEmail = masterAdminEmail.toLowerCase();
@@ -229,6 +249,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         }
         role = 'Admin';
         name = 'John Vic Garnica (Admin)';
+        userDesignation = 'Web Developer';
       } else {
         // Check registered Admin Directory
         const registeredAdmin = adminList.find(
@@ -257,6 +278,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         role = 'Admin';
         name = registeredAdmin.name;
+        if (cleanEmail.includes('marivic') || cleanEmail.includes('villaluz')) {
+          userDesignation = registeredAdmin.designation || 'School Principal';
+        } else if (cleanEmail.includes('norma') || cleanEmail.includes('jabagat')) {
+          userDesignation = registeredAdmin.designation || 'Master Teacher';
+        } else if (cleanEmail.includes('coordinator') || registeredAdmin.designation === 'Coordinator') {
+          userDesignation = 'Coordinator';
+        } else {
+          userDesignation = registeredAdmin.designation || 'Coordinator';
+        }
       }
     } else {
       // 1. STRICT FACULTY CHECK: Read faculty directory from Firebase state
@@ -298,6 +328,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         email: cleanEmail,
         role: role,
         department: userDepartment,
+        designation: userDesignation,
       };
 
       if (rememberMe) {
@@ -440,7 +471,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       setAdminRegName('');
       setAdminRegEmail('');
       setAdminRegPassword('');
-      setAdminRegDesignation('School Administrator');
+      setAdminRegDesignation('School Principal');
       setAdminRegSuccess(false);
     }, 2500);
   };
@@ -1258,14 +1289,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
                     <span>Admin Title / Designation</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={adminRegDesignation}
-                    onChange={(e) => setAdminRegDesignation(e.target.value)}
-                    placeholder="e.g. Assistant Principal / School Administrator"
+                    onChange={(e) => setAdminRegDesignation(e.target.value as 'School Principal' | 'Master Teacher' | 'Coordinator')}
                     required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-amber-500 font-mono font-medium"
-                  />
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:bg-white focus:border-amber-500 font-mono font-medium cursor-pointer"
+                  >
+                    <option value="School Principal">School Principal</option>
+                    <option value="Master Teacher">Master Teacher</option>
+                    <option value="Coordinator">Coordinator</option>
+                  </select>
                 </div>
 
                 <div className="space-y-1">

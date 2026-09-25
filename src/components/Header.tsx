@@ -53,6 +53,9 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [timeUtc, setTimeUtc] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const isCoordinator =
+    currentUser?.designation === 'Coordinator' ||
+    (currentUser?.designation?.toLowerCase().includes('coordinator') ?? false);
 
   useEffect(() => {
     const updateClock = () => {
@@ -163,18 +166,20 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              {/* Submission Report Button next to Admin Dashboard */}
-              <button
-                onClick={() => setActiveTab('submission-report')}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer relative ${
-                  activeTab === 'submission-report'
-                    ? 'bg-blue-600 text-white shadow-2xs scale-[1.02]'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/80 hover:scale-[1.01]'
-                }`}
-              >
-                <FileCheck2 className={`w-4 h-4 ${activeTab === 'submission-report' ? 'text-emerald-300' : 'text-emerald-600'}`} />
-                <span>Submission Report</span>
-              </button>
+              {/* Submission Report Button next to Admin Dashboard (Hidden for Coordinator) */}
+              {!isCoordinator && (
+                <button
+                  onClick={() => setActiveTab('submission-report')}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer relative ${
+                    activeTab === 'submission-report'
+                      ? 'bg-blue-600 text-white shadow-2xs scale-[1.02]'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/80 hover:scale-[1.01]'
+                  }`}
+                >
+                  <FileCheck2 className={`w-4 h-4 ${activeTab === 'submission-report' ? 'text-emerald-300' : 'text-emerald-600'}`} />
+                  <span>Submission Report</span>
+                </button>
+              )}
             </nav>
 
             {/* Action Buttons */}
@@ -195,7 +200,7 @@ export const Header: React.FC<HeaderProps> = ({
                     {currentUser.name}
                   </div>
                   <div className="text-[10px] text-blue-600 font-bold uppercase tracking-wider">
-                    {currentUser.role}
+                    {currentUser.designation || currentUser.role}
                   </div>
                 </div>
 
@@ -274,20 +279,22 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => {
-                  setActiveTab('submission-report');
-                  setIsMobileMenuOpen(false);
-                }}
-                className={`flex flex-col items-center justify-center py-2.5 rounded-xl text-xs font-bold transition-all duration-200 min-h-[44px] cursor-pointer ${
-                  activeTab === 'submission-report'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-700 hover:bg-slate-200/80'
-                }`}
-              >
-                <FileCheck2 className={`w-4 h-4 mb-1 ${activeTab === 'submission-report' ? 'text-emerald-300' : 'text-emerald-600'}`} />
-                <span>Reports</span>
-              </button>
+              {!isCoordinator && (
+                <button
+                  onClick={() => {
+                    setActiveTab('submission-report');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`flex flex-col items-center justify-center py-2.5 rounded-xl text-xs font-bold transition-all duration-200 min-h-[44px] cursor-pointer ${
+                    activeTab === 'submission-report'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'text-slate-700 hover:bg-slate-200/80'
+                  }`}
+                >
+                  <FileCheck2 className={`w-4 h-4 mb-1 ${activeTab === 'submission-report' ? 'text-emerald-300' : 'text-emerald-600'}`} />
+                  <span>Reports</span>
+                </button>
+              )}
             </div>
 
             {/* Mobile Action Buttons */}

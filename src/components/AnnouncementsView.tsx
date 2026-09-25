@@ -216,7 +216,19 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
       id: 'admin-master',
       name: 'John Vic Garnica (Admin)',
       email: 'johnvic.garnica@deped.gov.ph',
-      designation: 'School Administrator (Master Admin)',
+      designation: 'Web Developer',
+    },
+    {
+      id: 'admin-marivic',
+      name: 'Marivic R. Villaluz',
+      email: 'marivic.villaluz@deped.gov.ph',
+      designation: 'School Principal',
+    },
+    {
+      id: 'admin-norma',
+      name: 'Norma Jabagat',
+      email: 'norma.jabagat@deped.gov.ph',
+      designation: 'Master Teacher',
     },
   ]);
 

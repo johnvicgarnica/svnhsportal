@@ -12,6 +12,7 @@ import {
   DriveFolder,
   FacultyFolder,
   FacultyPersonalFile,
+  SchoolPermanentFolder,
 } from './types';
 import {
   INITIAL_FILES,
@@ -52,6 +53,10 @@ import {
   saveFacultyFileToFirestore,
   deleteFacultyFileFromFirestore,
   getStoredFacultyFiles,
+  seedInitialAdminIfEmpty,
+  subscribeSchoolPermanentFolders,
+  getStoredSchoolPermanentFolders,
+  updateSchoolPermanentFolderInFirestore,
 } from './lib/firebase';
 
 export function App() {
@@ -68,6 +73,18 @@ export function App() {
             user.name = user.email.split('@')[0];
           }
         }
+        if (user && user.role === 'Admin') {
+          const emailLower = (user.email || '').toLowerCase();
+          if (emailLower.includes('johnvic') || emailLower === 'garjohn@deped.gov.ph' || emailLower === 'johnvicgarnica1@gmail.com') {
+            user.designation = 'Web Developer';
+          } else if (emailLower.includes('marivic') || emailLower.includes('villaluz')) {
+            user.designation = 'School Principal';
+          } else if (emailLower.includes('norma') || emailLower.includes('jabagat')) {
+            user.designation = 'Master Teacher';
+          } else if (emailLower.includes('coordinator')) {
+            user.designation = user.designation || 'Coordinator';
+          }
+        }
         return user;
       } catch {
         return null;
@@ -81,6 +98,9 @@ export function App() {
     if (saved) {
       try {
         const u = JSON.parse(saved);
+        if (u && (u.designation === 'Coordinator' || u.designation?.toLowerCase().includes('coordinator'))) {
+          return 'announcements';
+        }
         if (u && u.role === 'Faculty') return 'my-workspace';
         if (u && u.role === 'Admin') return 'admin';
       } catch {}
@@ -134,6 +154,7 @@ export function App() {
   // Subscribe to Google Drive Folders in Firebase
   useEffect(() => {
     seedInitialDriveFoldersIfEmpty();
+    seedInitialAdminIfEmpty();
     const unsub = subscribeDriveFolders((list) => {
       setDriveFolders(list || []);
     });
@@ -155,6 +176,27 @@ export function App() {
     });
     return () => unsub();
   }, []);
+
+  // School Permanent Folders (SCHOOL FORMS & SCHOOL DOCUMENTS)
+  const [schoolPermanentFolders, setSchoolPermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
+    return getStoredSchoolPermanentFolders();
+  });
+
+  useEffect(() => {
+    const unsub = subscribeSchoolPermanentFolders((list) => {
+      if (list && list.length > 0) {
+        setSchoolPermanentFolders(list);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleUpdateSchoolPermanentFolder = async (
+    id: 'school-forms' | 'school-documents',
+    updates: { driveUrl?: string; description?: string; updatedBy?: string }
+  ) => {
+    await updateSchoolPermanentFolderInFirestore(id, updates);
+  };
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -469,8 +511,35 @@ export function App() {
   };
   const publishedAnnouncementsCount = announcements.filter((a) => a.status === 'published').length;
 
+  const isCoordinator =
+    currentUser?.designation === 'Coordinator' ||
+    (currentUser?.designation?.toLowerCase().includes('coordinator') ?? false);
+
+  // Restrict Coordinator from accessing Submission Report, My Workspace, or Files
+  useEffect(() => {
+    if (isCoordinator && (activeTab === 'submission-report' || activeTab === 'my-workspace' || activeTab === 'files')) {
+      setActiveTab('announcements');
+    }
+  }, [isCoordinator, activeTab]);
+
+  const handleLogin = (user: UserProfile) => {
+    setCurrentUser(user);
+    const isCoord =
+      user.designation === 'Coordinator' ||
+      (user.designation?.toLowerCase().includes('coordinator') ?? false);
+    if (isCoord) {
+      setActiveTab('announcements');
+    } else if (user.role === 'Admin') {
+      setActiveTab('admin');
+    } else if (user.role === 'Faculty') {
+      setActiveTab('my-workspace');
+    } else {
+      setActiveTab('announcements');
+    }
+  };
+
   if (!currentUser) {
-    return <LoginScreen onLogin={setCurrentUser} />;
+    return <LoginScreen onLogin={handleLogin} />;
   }
 
   return (
@@ -505,12 +574,14 @@ export function App() {
               currentUser={currentUser}
               facultyFolders={facultyFolders}
               facultyFiles={facultyFiles}
+              schoolPermanentFolders={schoolPermanentFolders}
               onAddFolder={handleAddFacultyFolder}
               onEditFolder={handleEditFacultyFolder}
               onDeleteFolder={handleDeleteFacultyFolder}
               onAddFile={handleAddFacultyFile}
               onDeleteFile={handleDeleteFacultyFile}
               onNavigateToRepository={() => setActiveTab('files')}
+              onNavigateToAdminDashboard={() => setActiveTab('admin')}
             />
           )}
 
@@ -560,6 +631,8 @@ export function App() {
               driveFolders={driveFolders}
               facultyFolders={facultyFolders}
               facultyFiles={facultyFiles}
+              schoolPermanentFolders={schoolPermanentFolders}
+              onUpdateSchoolPermanentFolder={handleUpdateSchoolPermanentFolder}
               onAddAnnouncement={handleAddAnnouncement}
               onEditAnnouncement={handleEditAnnouncement}
               onDeleteAnnouncement={handleDeleteAnnouncement}
@@ -575,7 +648,7 @@ export function App() {
             />
           )}
 
-          {activeTab === 'submission-report' && (
+          {activeTab === 'submission-report' && !isCoordinator && (
             <SubmissionReportView
               currentUser={currentUser}
               facultyFolders={facultyFolders}
